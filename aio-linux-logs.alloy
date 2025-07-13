@@ -1,0 +1,233 @@
+/* =============================================================================
+ * GRAFANA ALLOY CONFIGURATION - Linux System Logs Only
+ * =============================================================================
+ *
+ * ACTIVE SECTIONS:
+ * 1. TARGETS (LOGS ONLY)         - Loki endpoint only (no Prometheus)
+ * 2. SYSTEM LOGS & JOURNAL       - Journal and file-based log collection
+ * 3. LOG PROCESSING AND FILTERING - Advanced log level filtering (WARNING+ only)
+ *
+ * NOTE: This configuration excludes metrics collection for Linux systems
+ * For more details: https://github.com/IT-BAER/alloy-aio
+ * =============================================================================
+ */
+
+// =============================================================================
+// SECTION 1: TARGETS (LOGS ONLY)
+// =============================================================================
+
+loki.write "default" {
+  endpoint {
+    url = "https://your-loki-instance.com/loki/api/v1/push"
+
+    // Optional: Add authentication if needed
+    // basic_auth {
+    //   username = "your-username"
+    //   password = "your-password"
+    // }
+  }
+}
+
+// =============================================================================
+// SECTION 2: SYSTEM LOGS & JOURNAL
+// =============================================================================
+
+loki.source.journal "journal" {
+  max_age       = "24h0m0s"
+  relabel_rules = discovery.relabel.journal.rules
+  forward_to    = [loki.process.filter_journal.receiver]
+  labels        = {
+    instance     = constants.hostname,
+    source       = "systemd-journal",
+    job          = string.format("%s-logs", constants.hostname),
+    service_name = string.format("%s-logs", constants.hostname),
+  }
+  path          = "/var/log/journal"
+}
+
+local.file_match "system" {
+  path_targets = [{
+    __address__ = "localhost",
+    __path__    = "/var/log/{syslog,messages,*.log}",
+    instance    = constants.hostname,
+    job         = string.format("%s-logs", constants.hostname),
+  }]
+}
+
+discovery.relabel "journal" {
+  targets = []
+  rule {
+    source_labels = ["__journal__systemd_unit"]
+    target_label  = "unit"
+  }
+  rule {
+    source_labels = ["__journal__boot_id"]
+    target_label  = "boot_id"
+  }
+  rule {
+    source_labels = ["__journal__transport"]
+    target_label  = "transport"
+  }
+  rule {
+    source_labels = ["__journal_priority_keyword"]
+    target_label  = "level"
+  }
+}
+
+loki.source.file "system" {
+  targets    = local.file_match.system.targets
+  forward_to = [loki.process.filter_files.receiver]
+}
+
+// =============================================================================
+// SECTION 3: LOG PROCESSING AND FILTERING
+// =============================================================================
+
+// Process and filter journal logs - keep only WARNING level and above
+loki.process "filter_journal" {
+  forward_to = [loki.write.default.receiver]
+
+  // Extract message and process fields from syslog format
+  stage.regex {
+    expression = "^(?P<timestamp>[^ ]+) (?P<hostname>[^ ]+) (?P<process>[^\\[\\s]+)(?:\\[(?P<pid>\\d+)\\])?: (?P<message>.*)$"
+  }
+
+  // Drop DEBUG level logs
+  stage.drop {
+    source = "level"
+    value = "debug"
+    drop_counter_reason = "debug_filtered"
+  }
+
+  // Drop INFO level logs
+  stage.drop {
+    source = "level"
+    value = "info"
+    drop_counter_reason = "info_filtered"
+  }
+
+  // Drop NOTICE level logs
+  stage.drop {
+    source = "level"
+    value = "notice"
+    drop_counter_reason = "notice_filtered"
+  }
+
+  // Also drop logs where level might be capitalized
+  stage.drop {
+    source = "level"
+    value = "DEBUG" 
+    drop_counter_reason = "debug_caps_filtered"
+  }
+
+  stage.drop {
+    source = "level" 
+    value = "INFO"
+    drop_counter_reason = "info_caps_filtered"
+  }
+
+  stage.drop {
+    source = "level"
+    value = "NOTICE"
+    drop_counter_reason = "notice_caps_filtered"
+  }
+  
+  // Extract msg field from logfmt-style logs
+  stage.regex {
+    expression = "msg=\"(?P<msg>[^\"]*)\""
+  }
+  
+  // Add process and message as labels for easy searching
+  stage.labels {
+    values = {
+      process = "",
+    }
+  }
+  
+  // Set message as the log content
+  stage.output {
+    source = "message"
+  }
+  
+  // Add msg as structured metadata
+  stage.structured_metadata {
+    values = {
+      msg = "msg",
+    }
+  }
+}
+
+// Process and filter file-based logs with intelligent level detection
+loki.process "filter_files" {
+  forward_to = [loki.write.default.receiver]
+
+  // Extract message and process fields from syslog format
+  stage.regex {
+    expression = "^(?P<timestamp>[^ ]+) (?P<hostname>[^ ]+) (?P<process>[^\\[\\s]+)(?:\\[(?P<pid>\\d+)\\])?: (?P<message>.*)$"
+  }
+
+  // LEVEL DETECTION: Extract log levels from various formats
+  stage.regex {
+    expression = "(?i)\\b(?P<extracted_level>emerg(?:ency)?|alert|crit(?:ical)?|err(?:or)?|warn(?:ing)?|notice|info|debug)\\b"
+  }
+
+  stage.regex {
+    expression = "(?i)(?:level|severity|priority)\\s*[=:]\\s*[\"']?(?P<structured_level>emerg(?:ency)?|alert|crit(?:ical)?|err(?:or)?|warn(?:ing)?|notice|info|debug)[\"']?"
+  }
+  
+  // Extract msg field from logfmt-style logs
+  stage.regex {
+    expression = "msg=\"(?P<msg>[^\"]*)\""
+  }
+
+  // LEVEL NORMALIZATION
+  stage.template {
+    source = "log_level"
+    template = "{{ if .structured_level }}{{ .structured_level | ToLower }}{{ else if .extracted_level }}{{ .extracted_level | ToLower }}{{ else }}unknown{{ end }}"
+  }
+
+  // FILTERING: Drop all non-WARNING+ logs
+  stage.drop {
+    source = "log_level" 
+    value = "debug"
+    drop_counter_reason = "file_debug_filtered"
+  }
+
+  stage.drop {
+    source = "log_level"
+    value = "info"
+    drop_counter_reason = "file_info_filtered"
+  }
+
+  stage.drop {
+    source = "log_level"
+    value = "notice"
+    drop_counter_reason = "file_notice_filtered"
+  }
+
+  stage.drop {
+    source = "log_level"
+    value = "unknown"
+    drop_counter_reason = "file_unknown_filtered"
+  }
+
+  // LABELING: Add searchable metadata
+  stage.labels {
+    values = {
+      level = "log_level",
+      process = "",
+    }
+  }
+  
+  // Set message as the log content
+  stage.output {
+    source = "message"
+  }
+  
+  // Add msg as structured metadata
+  stage.structured_metadata {
+    values = {
+      msg = "msg",
+    }
+  }
+}

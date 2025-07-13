@@ -1,0 +1,230 @@
+/* =============================================================================
+ * GRAFANA ALLOY CONFIGURATION - Windows System Monitoring
+ * =============================================================================
+ *
+ * Simple, working Windows observability configuration using latest Alloy components:
+ * 1. TARGETS                    - Loki & Prometheus endpoints
+ * 2. WINDOWS EVENT LOGS COLLECTION - Application, System, Security logs
+ * 3. SYSTEM METRICS             - Windows system performance metrics
+ * 4. SELF-MONITORING            - Alloy self-metrics
+ *
+ * For more details: https://github.com/IT-BAER/alloy-aio
+ * =============================================================================
+ */
+
+// =============================================================================
+// SECTION 1: TARGETS
+// =============================================================================
+
+loki.write "default" {
+  endpoint {
+    url = "https://your-loki-instance.com/loki/api/v1/push"
+
+    // Optional: Add authentication if needed
+    // basic_auth {
+    //   username = "your-username"
+    //   password = "your-password"
+    // }
+  }
+}
+
+prometheus.remote_write "default" {
+  endpoint {
+    url = "https://your-prometheus-instance.com/api/v1/write"
+
+    // Optional: Add authentication if needed
+    // basic_auth {
+    //   username = "your-username" 
+    //   password = "your-password"
+    // }
+  }
+}
+
+// =============================================================================
+// SECTION 2: WINDOWS EVENT LOGS COLLECTION
+// =============================================================================
+
+loki.source.windowsevent "application" {
+  eventlog_name = "Application"
+  xpath_query   = "*[System[(Level=1 or Level=2 or Level=3)]]"
+  forward_to    = [loki.process.windows_events.receiver]
+  labels        = {
+    job = string.format("%s-logs", constants.hostname),
+    instance = constants.hostname,
+    source = "windows_events",
+  }
+}
+
+loki.source.windowsevent "system" {
+  eventlog_name = "System"
+  xpath_query   = "*[System[(Level=1 or Level=2 or Level=3)]]"
+  forward_to    = [loki.process.windows_events.receiver]
+  labels        = {
+    job = string.format("%s-logs", constants.hostname),
+    instance = constants.hostname,
+    source = "windows_events",
+  }
+}
+
+loki.source.windowsevent "security" {
+  eventlog_name = "Security"
+  xpath_query   = "*[System[(Level=1 or Level=2)]]"
+  forward_to    = [loki.process.windows_events.receiver]
+  labels        = {
+    job = string.format("%s-logs", constants.hostname),
+    instance = constants.hostname,
+    source = "windows_events",
+  }
+}
+
+loki.process "windows_events" {
+  // Add additional labels for better organization  
+  stage.labels {
+    values = {
+      service  = "windows_events",
+      eventlog = "eventlog_name",
+    }
+  }
+
+  stage.json {
+    expressions = {
+      level     = "level",
+      source    = "source",
+      event_id  = "event_id",
+      message   = "message",
+      computer  = "computer",
+    }
+  }
+
+  stage.template {
+    source = "detected_level"
+    template = `{{- $level := .level -}}
+    {{- if eq $level "0" -}}info
+    {{- else if eq $level "1" -}}critical
+    {{- else if eq $level "2" -}}error
+    {{- else if eq $level "3" -}}warning
+    {{- else if eq $level "4" -}}info
+    {{- else if eq $level "5" -}}debug
+    {{- else -}}unknown{{- end -}}`
+  }
+
+  stage.structured_metadata {
+    values = {
+      event_id       = "event_id",
+      level          = "level",
+      detected_level = "detected_level", 
+      source         = "source",
+      instance       = "computer",
+    }
+  }
+
+  stage.labels {
+    values = {
+      detected_level = "detected_level",
+    }
+  }
+
+  forward_to = [loki.write.default.receiver]
+}
+
+// =============================================================================
+// SECTION 3: SYSTEM METRICS
+// =============================================================================
+
+discovery.relabel "metrics" {
+  targets = prometheus.exporter.windows.metrics.targets
+
+  rule {
+    target_label = "instance"
+    replacement  = constants.hostname
+  }
+  
+    rule {
+      target_label = "job"
+      replacement = string.format("%s-metrics", constants.hostname)
+    }
+}
+
+prometheus.exporter.windows "metrics" {
+  // Complete list of up-to-date Windows collectors (excluding deprecated ones)
+  // Deprecated collectors excluded: cs, os, msmq
+  enabled_collectors = [
+    // CORE SYSTEM METRICS
+    "cpu",              // CPU usage metrics
+    "cpu_info",         // CPU information (replaces cs collector for logical processors)
+    "memory",           // Memory usage metrics (replaces cs collector for physical memory)
+    "system",           // System calls and basic system information
+    
+    // STORAGE METRICS  
+    "logical_disk",     // Logical disk usage and I/O
+    "physical_disk",    // Physical disk metrics
+    
+    // NETWORK METRICS
+    "net",              // Network interface I/O
+    "tcp",              // TCP connection metrics
+    
+    // SYSTEM SERVICES & PROCESSES
+    "service",          // Windows service state metrics
+    "process",          // Per-process metrics
+    
+    // ADDITIONAL USEFUL METRICS
+    "time",             // Windows Time Service metrics
+    "thermalzone",      // Thermal information
+    "pagefile",         // Pagefile usage metrics
+    "logon",            // User logon sessions
+    
+  ]
+}
+
+prometheus.scrape "metrics" {
+  targets    = discovery.relabel.metrics.output
+  forward_to = [prometheus.relabel.windows_to_instance.receiver]
+
+  scrape_interval = "5s"
+  scrape_timeout  = "4s"
+}
+
+// Relabel Windows metrics to use instance_ prefix for unified metrics
+prometheus.relabel "windows_to_instance" {
+  forward_to = [prometheus.remote_write.default.receiver]
+
+  // Rename windows_ prefix to instance_ prefix for unified metrics
+  rule {
+    source_labels = ["__name__"]
+    regex         = "windows_(.*)"
+    target_label  = "__name__"
+    replacement   = "instance_${1}"
+  }
+
+  // Keep all other metrics unchanged (this rule catches everything that doesn't match the above)
+  rule {
+    source_labels = ["__name__"]
+    regex         = "(.*)"
+    target_label  = "__name__"
+    replacement   = "${1}"
+  }
+}
+
+// =============================================================================
+// SECTION 4: SELF-MONITORING
+// =============================================================================
+
+// Monitor Alloy itself
+prometheus.exporter.self "alloy" { }
+
+// Label relabeling for Alloy self-monitoring
+discovery.relabel "alloy_metrics" {
+  targets = prometheus.exporter.self.alloy.targets
+
+  rule {
+    target_label = "instance"
+    replacement  = constants.hostname
+  }
+}
+
+prometheus.scrape "alloy_metrics" {
+  targets    = discovery.relabel.alloy_metrics.output
+  forward_to = [prometheus.remote_write.default.receiver]
+
+  job_name = "alloy-self"
+}

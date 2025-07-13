@@ -1,0 +1,16 @@
+[Unit]
+Description=Proxmox Guest Metrics Exporter (for Alloy)
+After=network.target
+
+[Service]
+Type=simple
+User=alloy
+Group=alloy
+EnvironmentFile=/etc/alloy/pve-guest-exporter.env
+WorkingDirectory=/etc/alloy
+ExecStart=/etc/alloy/pve-guest-exporter-venv/bin/gunicorn --bind 127.0.0.1:9221 pve-guest-exporter:app
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target
