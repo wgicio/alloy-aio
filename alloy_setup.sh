@@ -266,8 +266,14 @@ update_packages() {
 install_prerequisites() {
     # Only install essential system packages for Python and system utilities
     # Application dependencies (flask, requests, gunicorn) are installed in the virtualenv below
-    local user_packages=("gpg" "wget" "systemd" "acl" "python3" "python3-venv")
-    local dpkg_packages=("gnupg" "wget" "systemd" "acl" "python3" "python3-venv")
+    # Skip Python/venv/exporter dependencies for virtualized/container systems (logs only)
+    if [[ "$SYSTEM_TYPE" == "proxmox-container" || "$SYSTEM_TYPE" == "proxmox-vm" ]]; then
+        local user_packages=("gpg" "wget" "systemd" "acl")
+        local dpkg_packages=("gnupg" "wget" "systemd" "acl")
+    else
+        local user_packages=("gpg" "wget" "systemd" "acl" "python3" "python3-venv")
+        local dpkg_packages=("gnupg" "wget" "systemd" "acl" "python3" "python3-venv")
+    fi
     local n=${#user_packages[@]}
     for ((i=0; i<n; i++)); do
         local user_name="${user_packages[$i]}"
@@ -280,7 +286,7 @@ install_prerequisites() {
         fi
     done
 
-    # For Proxmox hosts, create a virtualenv for the exporter and install dependencies with pip
+    # For Proxmox hosts only, create a virtualenv for the exporter and install dependencies with pip
     if [[ "$SYSTEM_TYPE" == "proxmox-host" ]]; then
         local venv_dir="/etc/alloy/pve-guest-exporter-venv"
         if [[ ! -d "$venv_dir" ]]; then
@@ -881,9 +887,7 @@ main() {
     setup_grafana_repo
     install_alloy
     # Only perform Proxmox user/token/permission actions if not a Proxmox host or override is granted
-    if [[ "$SYSTEM_TYPE" != "proxmox-host" ]]; then
-        setup_permissions
-    else
+    if [[ "$SYSTEM_TYPE" == "proxmox-host" ]]; then
         setup_proxmox_exporter_user_and_token
         if [[ "$PROXMOX_OVERRIDE_GRANTED" == "1" ]]; then
             setup_permissions
@@ -891,6 +895,8 @@ main() {
             log_warning "Skipping all Proxmox user, token, and permissions setup due to denied override."
         fi
         setup_proxmox_exporter_service
+    else
+        setup_permissions
     fi
     deploy_configuration
     configure_service
