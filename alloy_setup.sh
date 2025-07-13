@@ -752,57 +752,15 @@ setup_proxmox_exporter_user_and_token() {
     fi
     log "Setting up Proxmox API user, role, and token for exporter..."
     local pve_user="alloy@pve"
-    local token_id="exporter"
+    local token_id="$(hostname)"
     local env_file="/etc/alloy/pve-guest-exporter.env"
     local token_value=""
     PROXMOX_OVERRIDE_GRANTED="1" # Default: do all actions
 
-    # Try to create user first, and if 'already exists' is detected, prompt for override
+    # Try to create user first, but do NOT prompt or override if it exists
     user_add_output=$(pveum user add "$pve_user" --comment "Grafana Alloy Exporter" --enable 1 2>&1) || true
     if echo "$user_add_output" | grep -qi 'already exists'; then
-        read -e -i Y -p "Proxmox user $pve_user already exists. Override user, role, and token? [Y/n]: " resp_all
-        resp_all=${resp_all:-Y}
-        if [[ ! "$resp_all" =~ ^[Yy]$ ]]; then
-            log_warning "User will not be overridden. Please ensure correct permissions and token in $env_file."
-            PROXMOX_OVERRIDE_GRANTED="0"
-            return 0
-        fi
-            # Step 1: Delete all tokens for the user
-            log "Listing tokens for $pve_user before deletion..."
-            token_list=$(pveum user token list "$pve_user" 2>/dev/null | awk '/^│/ {print $2}' | grep -v '^$' | grep -v 'tokenid' || true)
-            if [[ -n "$token_list" ]]; then
-                for tkn in $token_list; do
-                log "Deleting token $tkn for $pve_user..."
-                pveum user token delete "$pve_user" "$tkn" 2>&1 | tee -a /tmp/pveum_user_delete.log
-                done
-            fi
-
-        # Delete the user
-        pveum user delete "$pve_user" 2>&1 | tee -a /tmp/pveum_user_delete.log
-        if pveum user list | awk '{print $1}' | grep -Fxq "$pve_user"; then
-            log_error "Failed to delete Proxmox user $pve_user. Aborting."
-            PROXMOX_OVERRIDE_GRANTED="0"
-            return 1
-        else
-            log_success "Proxmox user $pve_user deleted."
-        fi
-        # Create user
-        user_add_output=$(pveum user add "$pve_user" --comment "Grafana Alloy Exporter" --enable 1 2>&1) || true
-        if echo "$user_add_output" | grep -qi 'already exists'; then
-            log_error "Proxmox user $pve_user could not be created due to 'already exists' error. Please try cleaning up the Proxmox config manually, then re-run this script."
-            PROXMOX_OVERRIDE_GRANTED="0"
-            return 1
-        elif echo "$user_add_output" | grep -qi 'user config - ignore invalid acl token'; then
-            log_error "Proxmox user $pve_user could not be created due to 'invalid acl token' error. Please try cleaning up the Proxmox config manually, then re-run this script."
-            PROXMOX_OVERRIDE_GRANTED="0"
-            return 1
-        elif [[ -n "$user_add_output" ]]; then
-            log_error "Failed to create Proxmox user $pve_user: $user_add_output"
-            PROXMOX_OVERRIDE_GRANTED="0"
-            return 1
-        else
-            log_success "Proxmox user $pve_user created (after override)"
-        fi
+        log_success "Proxmox user $pve_user already exists. Continuing without override."
     elif [[ -n "$user_add_output" ]]; then
         log_error "Failed to create Proxmox user $pve_user: $user_add_output"
         PROXMOX_OVERRIDE_GRANTED="0"
@@ -818,31 +776,24 @@ setup_proxmox_exporter_user_and_token() {
     log "Assigning PVEAuditor role to $pve_user on / ..."
     acl_output=$(pveum acl modify / -user "$pve_user" -role PVEAuditor 2>&1) || true
     if echo "$acl_output" | grep -qi 'already exists'; then
-        log_warning "PVEAuditor role already assigned to $pve_user."
+        log_success "PVEAuditor role already assigned to $pve_user."
     elif [[ -n "$acl_output" ]]; then
         log_error "Failed to assign PVEAuditor role: $acl_output"
     else
         log_success "PVEAuditor role assigned to $pve_user."
     fi
 
-    # Always create a new token (user was just created or recreated)
-    pveum user token list "$pve_user"
-    # Defensive: if token still exists, delete it
+    # Only create the per-host token if it does not exist
     if pveum user token list "$pve_user" | grep '^│' | grep -v 'tokenid' | awk '{print $2}' | grep -Fxq "$token_id"; then
-        log "Old API token $pve_user!$token_id exists, removing..."
-        delete_output=$(pveum user token delete "$pve_user" "$token_id" 2>&1)
-        delete_status=$?
-        if [[ $delete_status -ne 0 ]] || echo "$delete_output" | grep -qi 'error'; then
-            log_error "Failed to delete old token $pve_user!$token_id: $delete_output"
-            pveum user token list "$pve_user"
-            echo "[NOTICE] Please add the correct token manually to $env_file."
-            PROXMOX_OVERRIDE_GRANTED="0"
-            return 1
-        else
-            log_success "Old API token $pve_user!$token_id deleted."
-        fi
+        log_success "API token $pve_user!$token_id already exists. Reusing existing token."
+        # Try to fetch the token value (not possible via CLI, so instruct user to copy manually if needed)
+        log_warning "If you do not have the token value, you must recreate the token manually in the Proxmox UI or CLI."
+        log_warning "The installer cannot retrieve the token value for existing tokens due to Proxmox API limitations."
+        log_warning "If you need to regenerate the token, delete it in the Proxmox UI or with: pveum user token delete $pve_user $token_id"
+        log_warning "Then re-run this installer."
+        PROXMOX_OVERRIDE_GRANTED="1"
+        return 0
     fi
-    pveum user token list "$pve_user"
     token_output=$(pveum user token add "$pve_user" "$token_id" --privsep 0 2>&1)
     # Try to extract the token value from the Proxmox table output
     token_value=""
