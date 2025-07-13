@@ -35,10 +35,14 @@
   <a href="#-credits">👏 Credits</a>
 </p>
 
+
+
+
 ## ✨ Features
 
 > **Automatic Detection:** The Installer Automatically Detects Whether the System is Standalone, Proxmox Host or VM/Container, and configures Logs + Metrics or Logs-Only Mode accordingly. No manual selection is required.
 
+<br>
 
 ## 🐧 Linux
 #### Standalone/Host
@@ -67,38 +71,24 @@
 
 **Automated, Secure Proxmox Guest Metrics Exporter for Alloy/Prometheus**
 
+- 📦 **Systemd Service:** `pve-guest-exporter.service` (runs as "alloy" User)
+- 🐍 **Python Script:** `/etc/alloy/pve-guest-exporter.py`
+- 🔑 **Token Env:** `/etc/alloy/pve-guest-exporter.env`
+- 🔄 **Idempotent Installer:** Always refreshes Token, Script, and Service
+- 🔒 **Security:** Minimal Permissions
+- 🚀 **Zero Configuration:** Fully automated Setup
+- 📊 **Prometheus Endpoint:** Exposes Guest Metrics at `http://localhost:9221/pve`
 
 ### ⚙️ How It Works
 
+- The Installer creates a Dedicated Proxmox API User and Token
+- The Token is stored in `/etc/alloy/pve-guest-exporter.env`
+- The Python Script authenticates to the Proxmox API, collects Guest Metrics, and exposes them for Prometheus/Alloy
 
-<br>
-
-## 📝 Requirements
-
-
-### 🐧 Linux
-
-- **Supported OS:** Debian 12+, Ubuntu 22.04+, Proxmox 8+ (host or VM/container)
-- **Privileges:** Root or sudo access for installation
-- **Network:** Internet access for downloading packages and configs
-- **Required Before Install:**
-  - `git` (to clone this repository)
-- **All other dependencies** (Python, pip, virtualenv, curl, wget, sudo, bash, systemd, etc.) **are installed automatically by the setup script.**
-- **Outbound Access:** Ability to reach your Loki and Prometheus endpoints
-
-### 🪟 Windows
-
-- **Supported OS:** Windows 10/11 Pro/Enterprise, Windows Server 2022+
-- **Privileges:** Administrator rights for installation
-- **Network:** Internet access for downloading installer and configs
-- **PowerShell:** Version 5.1 or later
-- **Outbound Access:** Ability to reach your Loki and Prometheus endpoints
-
-> **Note:** The installer scripts will attempt to install or validate all required dependencies automatically. For Linux, ensure Python 3, pip, and virtualenv are available (install via your package manager if missing). For Windows, PowerShell 5.1+ is included by default on modern systems.
 <br>
 
 ## 🚀 Quick Install
-
+> **⚠️ WARNING:** Running the installation script will overwrite the `alloy@pve` Proxmox user and can replace existing Alloy configuration files in `/etc/alloy/`. Back up your configuration if you have made manual changes.
 
 ### 🐧 Linux Installation (Standalone/Host: Logs + Metrics)
 ```bash
@@ -247,7 +237,7 @@ notepad "C:\Program Files\GrafanaLabs\Alloy\aio-windows.alloy"
 ```
 ```powershell
 # Validate syntax (run as Administrator)
-& "C:\Program Files\GrafanaLabs\Alloy\alloy.exe" fmt "C:\Program Files\GrafanaLabs\Alloy\aio-windows.alloy" --test
+& "C:\Program Files\GrafanaLabs\Alloy\alloy-windows-amd64.exe" fmt "C:\Program Files\GrafanaLabs\Alloy\aio-windows.alloy" --test
 ```
 ```powershell
 # Apply changes
@@ -315,7 +305,7 @@ Get-Acl "C:\Program Files\GrafanaLabs\Alloy\*"
 **✅ Config validation:**
 ```powershell
 # Run as Administrator
-& "C:\Program Files\GrafanaLabs\Alloy\alloy.exe" fmt "C:\Program Files\GrafanaLabs\Alloy\aio-windows.alloy" --test
+& "C:\Program Files\GrafanaLabs\Alloy\alloy-windows-amd64.exe" fmt "C:\Program Files\GrafanaLabs\Alloy\aio-windows.alloy" --test
 ```
 
 <br>
@@ -431,7 +421,7 @@ If the Alloy Service fails to start after Installation:
 3. **✅ Validate Configuration**:
    ```powershell
    # Run as Administrator
-   & "C:\Program Files\GrafanaLabs\Alloy\alloy.exe" fmt "C:\Program Files\GrafanaLabs\Alloy\aio-windows.alloy" --test
+   & "C:\Program Files\GrafanaLabs\Alloy\alloy-windows-amd64.exe" fmt "C:\Program Files\GrafanaLabs\Alloy\aio-windows.alloy" --test
    ```
 
 ### 🔍 No Logs/Metrics Appearing in Grafana
