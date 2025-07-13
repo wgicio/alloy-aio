@@ -6,7 +6,7 @@
 [![Grafana Alloy](https://img.shields.io/badge/Grafana-Alloy-orange.svg)](https://grafana.com/docs/alloy/)
 [![Loki Compatible](https://img.shields.io/badge/Loki-Compatible-blue.svg)](https://grafana.com/oss/loki/)
 [![Prometheus Compatible](https://img.shields.io/badge/Prometheus-Compatible-red.svg)](https://prometheus.io/)
-
+![GitHub stars](https://img.shields.io/github/stars/it-baer/alloy-aio?style=social)
 
 **Cross-Platform Grafana Alloy Install & Configuration with Platform-Optimized Monitoring Approach**
 
