@@ -42,9 +42,8 @@
 
 > **Automatic Detection:** The Installer Automatically Detects Whether the System is Standalone, Proxmox Host or VM/Container, and configures Logs + Metrics or Logs-Only Mode accordingly. No manual selection is required.
 
-<br>
 
-## 🐧 Linux
+### 🐧 Linux
 #### Standalone/Host
 - 🎯 **Smart Log Filtering**: Only WARNING+ Logs sent to Loki (Reduces Noise ~80%)
 - 📊 **Full Metrics**: System Metrics collection with Prometheus Integration (Bare Metal, Proxmox Host)
@@ -58,7 +57,7 @@
 
 <br>
 
-## 🪟 Windows Systems
+### 🪟 Windows Systems
 - 📊 **Full Monitoring**: Both Logs and System Metrics Collection
 - 🎯 **Advanced Event Log Parsing**: Clean, readable Windows Event Logs with XML Parsing
 - 📈 **System Metrics**: CPU, Memory, Disk, Network Monitoring etc.
@@ -67,7 +66,7 @@
 
 <br>
 
-## 🏢 Proxmox Guest Metrics Exporter (Integrated)
+### 🏢 Proxmox Guest Metrics Exporter (Integrated)
 
 **Automated, Secure Proxmox Guest Metrics Exporter for Alloy/Prometheus**
 
