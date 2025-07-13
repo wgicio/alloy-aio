@@ -881,6 +881,7 @@ main() {
     check_root
     check_system
     detect_proxmox
+    log "Detected system type: $SYSTEM_TYPE"
     configure_noninteractive_mode
     update_packages
     install_prerequisites
