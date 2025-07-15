@@ -1,4 +1,3 @@
-
 #!/bin/bash
 # =============================================================================
 # Grafana Alloy Installation Script for Linux Systems
@@ -763,6 +762,19 @@ setup_proxmox_exporter_user_and_token() {
     local token_value=""
     PROXMOX_OVERRIDE_GRANTED="1" # Default: do all actions
 
+    # Create custom AlloyMonitor role if it doesn't exist
+    log "Creating custom AlloyMonitor role..."
+    role_output=$(pveum role add AlloyMonitor -privs "VM.Audit,VM.Monitor,Datastore.Audit,Sys.Audit,Pool.Audit" 2>&1) || true
+    if echo "$role_output" | grep -qi 'already exists'; then
+        log_success "AlloyMonitor role already exists"
+    elif [[ -n "$role_output" ]]; then
+        log_error "Failed to create AlloyMonitor role: $role_output"
+        PROXMOX_OVERRIDE_GRANTED="0"
+        return 1
+    else
+        log_success "AlloyMonitor role created with required permissions"
+    fi
+
     # Try to create user first, but do NOT prompt or override if it exists
     user_add_output=$(pveum user add "$pve_user" --comment "Grafana Alloy Exporter" --enable 1 2>&1) || true
     if echo "$user_add_output" | grep -qi 'already exists'; then
@@ -778,15 +790,15 @@ setup_proxmox_exporter_user_and_token() {
     # If we reach here, override is granted or user is new
     PROXMOX_OVERRIDE_GRANTED="1"
 
-    # Assign PVEAuditor role to alloy@pve on root (cluster-wide read access)
-    log "Assigning PVEAuditor role to $pve_user on / ..."
-    acl_output=$(pveum acl modify / -user "$pve_user" -role PVEAuditor 2>&1) || true
+    # Assign AlloyMonitor role to alloy@pve on root (cluster-wide read access)
+    log "Assigning AlloyMonitor role to $pve_user on / ..."
+    acl_output=$(pveum acl modify / -user "$pve_user" -role AlloyMonitor 2>&1) || true
     if echo "$acl_output" | grep -qi 'already exists'; then
-        log_success "PVEAuditor role already assigned to $pve_user."
+        log_success "AlloyMonitor role already assigned to $pve_user."
     elif [[ -n "$acl_output" ]]; then
-        log_error "Failed to assign PVEAuditor role: $acl_output"
+        log_error "Failed to assign AlloyMonitor role: $acl_output"
     else
-        log_success "PVEAuditor role assigned to $pve_user."
+        log_success "AlloyMonitor role assigned to $pve_user."
     fi
 
     # Only create the per-host token if it does not exist
