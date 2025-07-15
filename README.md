@@ -95,6 +95,8 @@ First, set your Endpoint URLs:
 
 ```bash
 LOKI_URL="https://loki.yourdomain.com/loki/api/v1/push"
+```
+```bash
 PROMETHEUS_URL="https://prometheus.yourdomain.com/api/v1/write"
 ```
 
@@ -117,6 +119,8 @@ First, set your Endpoint URLs:
 
 ```powershell
 $LOKI_URL = "https://loki.yourdomain.com/loki/api/v1/push"
+```
+```powershell
 $PROMETHEUS_URL = "https://prometheus.yourdomain.com/api/v1/write"
 ```
 
@@ -180,6 +184,8 @@ First, set your Endpoint URLs:
 
 ```bash
 LOKI_URL="https://loki.yourdomain.com/loki/api/v1/push"
+```
+```bash
 PROMETHEUS_URL="https://prometheus.yourdomain.com/api/v1/write"
 ```
 
