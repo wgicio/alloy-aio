@@ -24,6 +24,25 @@ param(
     [switch]$Help
 )
 
+# Define Write-LogMessage function first
+function Write-LogMessage {
+    param([string]$Message, [string]$Level = "INFO")
+    $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    $prefix = switch ($Level) {
+        "SUCCESS" { "[SUCCESS]" }
+        "WARNING" { "[WARNING]" }
+        "ERROR" { "[ERROR]" }
+        default { "[INFO]" }
+    }
+    $color = switch ($Level) {
+        "SUCCESS" { "Green" }
+        "WARNING" { "Yellow" }
+        "ERROR" { "Red" }
+        default { "Cyan" }
+    }
+    Write-Host "$prefix $Message" -ForegroundColor $color
+}
+
 # Check if running as Administrator
 if (-NOT ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole] "Administrator")) {
     Write-Error "This script must be run as Administrator. Please run PowerShell as Administrator and try again."
@@ -79,6 +98,10 @@ function Test-IsVirtualMachine {
 
 # Configuration
 $IsVM = Test-IsVirtualMachine
+# Override ConfigUrl if not explicitly provided and running in a VM
+if (-not $ConfigUrl -and $IsVM) {
+    $ConfigUrl = "https://github.com/IT-BAER/alloy-aio/raw/main/aio-windows-logs.alloy"
+}
 $DefaultConfigUrl = if ($IsVM) {
     "https://github.com/IT-BAER/alloy-aio/raw/main/aio-windows-logs.alloy"
 } else {
@@ -117,24 +140,6 @@ function Clear-TempFiles {
 
 # Set up cleanup on script exit (including Ctrl+C)
 $null = Register-EngineEvent PowerShell.Exiting -Action { Clear-TempFiles }
-
-function Write-LogMessage {
-    param([string]$Message, [string]$Level = "INFO")
-    $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-    $prefix = switch ($Level) {
-        "SUCCESS" { "[SUCCESS]" }
-        "WARNING" { "[WARNING]" }
-        "ERROR" { "[ERROR]" }
-        default { "[INFO]" }
-    }
-    $color = switch ($Level) {
-        "SUCCESS" { "Green" }
-        "WARNING" { "Yellow" }
-        "ERROR" { "Red" }
-        default { "Cyan" }
-    }
-    Write-Host "$prefix $Message" -ForegroundColor $color
-}
 
 function Install-Alloy {
     Write-LogMessage "Installing Grafana Alloy on Windows..."
@@ -251,7 +256,8 @@ function Deploy-Configuration {
         }
     }
 
-    if ($PrometheusUrl) {
+    # Only update Prometheus URL if not a VM
+    if ($PrometheusUrl -and -not $IsVM) {
         Write-LogMessage "Updating Prometheus endpoint: $PrometheusUrl"
         (Get-Content $ConfigFile) -replace 'https://your-prometheus-instance.com/api/v1/write', $PrometheusUrl | Set-Content $ConfigFile
         if ((Get-Content $ConfigFile) -match [regex]::Escape($PrometheusUrl)) {
@@ -327,13 +333,15 @@ function Show-FinalStatus {
     Write-Host ""
 
     $service = Get-Service -Name "Alloy" -ErrorAction SilentlyContinue
-    $configType = "logs + metrics (full observability)"
+    $configType = if ($IsVM) { "logs only (VM-optimized)" } else { "logs + metrics (full observability)" }
     if ($service -and $service.Status -eq "Running") {
         Write-LogMessage "✅ Alloy is installed and running ($configType)" "SUCCESS"
         Write-LogMessage "Configuration file: $ConfigFile"
         Write-LogMessage "Web UI: http://127.0.0.1:12345/"
         Write-LogMessage "Windows Event Logs: Application, System, Security"
-        Write-LogMessage "Windows Metrics: CPU, Memory, Disk, Network, Services, etc."
+        if (-not $IsVM) {
+            Write-LogMessage "Windows Metrics: CPU, Memory, Disk, Network, Services, etc."
+        }
         Write-Host ""
         Write-Host "Next Steps:" -ForegroundColor Green
         Write-Host "  1. Check your Loki instance for incoming event log data" -ForegroundColor Green
