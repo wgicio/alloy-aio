@@ -3,7 +3,7 @@
 Proxmox guest metrics exporter for Prometheus
 - Authenticates to local Proxmox API
 - Exposes guest metrics at http://localhost:9221/pve
-- Provides comprehensive metrics including CPU, memory, disk, network, and utilization stats
+- Provides comprehensive metrics including CPU, memory, disk, network, utilization stats, swap, and OS info
 - Requires: requests, flask
 """
 import os
@@ -95,6 +95,10 @@ def add_guest_metrics(metrics, lbl, st):
     metrics.append(f'proxmox_guest_diskread_bytes_total{{{lbl}}} {st.get("diskread", 0)}')
     metrics.append(f'proxmox_guest_diskwrite_bytes_total{{{lbl}}} {st.get("diskwrite", 0)}')
 
+    # Swap metrics (available for both QEMU and LXC)
+    metrics.append(f'proxmox_guest_swap_bytes{{{lbl}}} {st.get("swap", 0)}')
+    metrics.append(f'proxmox_guest_maxswap_bytes{{{lbl}}} {st.get("maxswap", 0)}')
+
     # derived utilisation gauges (PromQL ready)
     if st.get("maxmem"):
         mem_perc = st["mem"] / st["maxmem"]
@@ -102,6 +106,10 @@ def add_guest_metrics(metrics, lbl, st):
     if st.get("maxdisk"):
         disk_perc = st["disk"] / st["maxdisk"]
         metrics.append(f'proxmox_guest_disk_utilisation{{{lbl}}} {disk_perc}')
+    # Swap utilization (only if maxswap > 0)
+    if st.get("maxswap") and st.get("maxswap") > 0:
+        swap_perc = st.get("swap", 0) / st["maxswap"]
+        metrics.append(f'proxmox_guest_swap_utilisation{{{lbl}}} {swap_perc}')
 
 
 # Metrics endpoint
