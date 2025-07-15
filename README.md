@@ -58,11 +58,18 @@
 <br>
 
 ### 🪟 Windows Systems
+
+#### Physical/Host
 - 📊 **Full Monitoring**: Both Logs and System Metrics Collection
 - 🎯 **Advanced Event Log Parsing**: Clean, readable Windows Event Logs with XML Parsing
 - 📈 **System Metrics**: CPU, Memory, Disk, Network Monitoring etc.
 - 🔧 **Service Integration**: Runs as Windows Service (Alloy)
 - 🚀 **PowerShell Install**: Native Windows Installation Experience
+
+#### Virtualized/Container
+- 📊 **Logs Only**: Event Log Collection without System Metrics
+- 🎯 **Smart Event Log Parsing**: Only WARNING+ Events sent to Loki (Reduces Noise)
+- 🚀 **Lightweight Config**: Optimized for Virtual Environments
 
 <br>
 
@@ -185,9 +192,6 @@ First, set your Endpoint URLs:
 ```bash
 LOKI_URL="https://loki.yourdomain.com/loki/api/v1/push"
 ```
-```bash
-PROMETHEUS_URL="https://prometheus.yourdomain.com/api/v1/write"
-```
 
 Then, run the Setup:
 
@@ -197,10 +201,10 @@ for vmid in $(qm list | awk 'NR>1 && $3=="running" {print $1}'); do
     if qm guest cmd $vmid ping >/dev/null 2>&1; then 
         if qm guest exec $vmid "cmd.exe" /c ver >/dev/null 2>&1; then 
             echo "🪟  Windows VM detected..."; 
-            qm guest exec $vmid --timeout 60 powershell.exe "Set-ExecutionPolicy Bypass -Scope Process -Force; \$ProgressPreference = 'SilentlyContinue'; [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; Remove-Item -Path 'C:\WINDOWS\TEMP\alloy-install' -Recurse -Force -ErrorAction SilentlyContinue; Remove-Item -Path 'C:\alloy_setup.ps1' -Force -ErrorAction SilentlyContinue; Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/IT-BAER/alloy-aio/main/alloy_setup_windows.ps1' -OutFile 'C:\alloy_setup.ps1'; & 'C:\alloy_setup.ps1' -LokiUrl '$LOKI_URL' -PrometheusUrl '$PROMETHEUS_URL' -NonInteractive; Remove-Item -Path 'C:\alloy_setup.ps1' -Force -ErrorAction SilentlyContinue;"
+            qm guest exec $vmid --timeout 60 powershell.exe "Set-ExecutionPolicy Bypass -Scope Process -Force; \$ProgressPreference = 'SilentlyContinue'; [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; Remove-Item -Path 'C:\WINDOWS\TEMP\alloy-install' -Recurse -Force -ErrorAction SilentlyContinue; Remove-Item -Path 'C:\alloy_setup.ps1' -Force -ErrorAction SilentlyContinue; Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/IT-BAER/alloy-aio/main/alloy_setup_windows.ps1' -OutFile 'C:\alloy_setup.ps1'; & 'C:\alloy_setup.ps1' -LokiUrl '$LOKI_URL' -NonInteractive; Remove-Item -Path 'C:\alloy_setup.ps1' -Force -ErrorAction SilentlyContinue;"
         else 
             echo "🐧  Linux VM detected..."; 
-            qm guest exec $vmid --timeout 60 -- bash -c "cd /tmp && rm -f alloy_setup.sh && wget -q https://raw.githubusercontent.com/IT-BAER/alloy-aio/main/alloy_setup.sh && chmod +x alloy_setup.sh && DEBIAN_FRONTEND=noninteractive sudo bash alloy_setup.sh --loki-url '$LOKI_URL' --prometheus-url '$PROMETHEUS_URL' --non-interactive && rm -f alloy_setup.sh"
+            qm guest exec $vmid --timeout 60 -- bash -c "cd /tmp && rm -f alloy_setup.sh && wget -q https://raw.githubusercontent.com/IT-BAER/alloy-aio/main/alloy_setup.sh && chmod +x alloy_setup.sh && DEBIAN_FRONTEND=noninteractive sudo bash alloy_setup.sh --loki-url '$LOKI_URL' --non-interactive && rm -f alloy_setup.sh"
         fi
     else 
         echo "⚠️  QEMU Guest Agent not available for VM $vmid"; 
@@ -250,13 +254,23 @@ This ensures you always get a working, tested Configuration optimized for each P
 
 <br>
 
-### 🪟 Windows Systems (Logs + Metrics)
+### 🪟 Windows Systems
+
+#### Physical/Host (Logs + Metrics)
 | 🏗️ **System Components** | 📊 **Monitoring Capabilities** | 🔧 **Configuration** |
 | :--: | :--: | :--: |
 | Grafana Alloy (latest stable, Windows service) | Structured Event Log collection (Application, System, Security) | Automated config download & deployment |
 | System metrics exporter | Full host metrics (CPU, memory, disk, network, services) | Efficient log shipping to Loki, metrics to Prometheus |
 | Runs as LocalSystem service by default | Smart log filtering (WARNING+ only) | Automated service installation & updates |
 | Event log and metrics forwarding | Windows service integration | Configuration validation & troubleshooting guidance |
+
+#### Virtualized/Proxmox VM (Logs Only)
+| 🏗️ **System Components** | 📊 **Monitoring Capabilities** | 🔧 **Configuration** |
+| :--: | :--: | :--: |
+| Grafana Alloy (latest stable, Windows service) | Structured Event Log collection (Application, System, Security) | Automated config download & deployment |
+| Lightweight logs-only config | VM-aware hostname labeling | Efficient log shipping to Loki |
+| Runs as LocalSystem service by default | Smart log filtering (WARNING+ only) | Resource-efficient configuration |
+| Event log forwarding only | No metrics collection | Proxmox-optimized deployment
 
 </div>
 
@@ -417,12 +431,12 @@ sudo systemctl restart pve-guest-exporter
 
 ## 🖥️ Tested Systems
 
-| OS | Version | Logs | Metrics | Status |
-|---|---------|------|---------|--------|
-| Proxmox (Host)| 8.4.1 | ✅ | ✅ | ✅ |
-| Debian (Virtualized)| 12+ | ✅ | ❌ | ✅ |
-| Windows Server | 2022+ | ✅ | ✅ | ✅ |
-| Windows 10/11 | Pro/Enterprise | ✅ | ✅ | ✅ |
+| OS | Version | Logs | Metrics | Status | Notes |
+|---|---------|------|---------|---------|-------|
+| Proxmox (Host)| 8.4.1 | ✅ | ✅ | ✅ | Full logs + metrics |
+| Debian (Virtualized)| 12+ | ✅ | ❌ | ✅ | Logs only (VM) |
+| Windows (Physical)| 10/11/Server 2022+ | ✅ | ✅ | ✅ | Full logs + metrics |
+| Windows (Proxmox VM)| 10/11/Server 2022+ | ✅ | ❌ | ✅ | Logs only (VM) |
 
 <br>
 

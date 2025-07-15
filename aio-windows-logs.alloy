@@ -1,0 +1,139 @@
+/* =============================================================================
+ * GRAFANA ALLOY CONFIGURATION - Windows System Monitoring
+ * =============================================================================
+ *
+ * Simple, working Windows observability configuration using latest Alloy components:
+ * 1. TARGETS                    - Loki & Prometheus endpoints
+ * 2. WINDOWS EVENT LOGS COLLECTION - Application, System, Security logs
+ * 3. SELF-MONITORING            - Alloy self-metrics
+ *
+ * For more details: https://github.com/IT-BAER/alloy-aio
+ * =============================================================================
+ */
+
+// =============================================================================
+// SECTION 1: TARGETS
+// =============================================================================
+
+loki.write "default" {
+  endpoint {
+    url = "https://your-loki-instance.com/loki/api/v1/push"
+
+    // Optional: Add authentication if needed
+    // basic_auth {
+    //   username = "your-username"
+    //   password = "your-password"
+    // }
+  }
+}
+
+// =============================================================================
+// SECTION 2: WINDOWS EVENT LOGS COLLECTION
+// =============================================================================
+
+loki.source.windowsevent "application" {
+  eventlog_name = "Application"
+  xpath_query   = "*[System[(Level=1 or Level=2 or Level=3)]]"
+  forward_to    = [loki.process.windows_events.receiver]
+  labels        = {
+    job = string.format("%s-logs", constants.hostname),
+    instance = constants.hostname,
+    source = "windows_events",
+  }
+}
+
+loki.source.windowsevent "system" {
+  eventlog_name = "System"
+  xpath_query   = "*[System[(Level=1 or Level=2 or Level=3)]]"
+  forward_to    = [loki.process.windows_events.receiver]
+  labels        = {
+    job = string.format("%s-logs", constants.hostname),
+    instance = constants.hostname,
+    source = "windows_events",
+  }
+}
+
+loki.source.windowsevent "security" {
+  eventlog_name = "Security"
+  xpath_query   = "*[System[(Level=1 or Level=2)]]"
+  forward_to    = [loki.process.windows_events.receiver]
+  labels        = {
+    job = string.format("%s-logs", constants.hostname),
+    instance = constants.hostname,
+    source = "windows_events",
+  }
+}
+
+loki.process "windows_events" {
+  // Add additional labels for better organization  
+  stage.labels {
+    values = {
+      service  = "windows_events",
+      eventlog = "eventlog_name",
+    }
+  }
+
+  stage.json {
+    expressions = {
+      level     = "level",
+      source    = "source",
+      event_id  = "event_id",
+      message   = "message",
+      computer  = "computer",
+    }
+  }
+
+  stage.template {
+    source = "detected_level"
+    template = `{{- $level := .level -}}
+    {{- if eq $level "0" -}}info
+    {{- else if eq $level "1" -}}critical
+    {{- else if eq $level "2" -}}error
+    {{- else if eq $level "3" -}}warning
+    {{- else if eq $level "4" -}}info
+    {{- else if eq $level "5" -}}debug
+    {{- else -}}unknown{{- end -}}`
+  }
+
+  stage.structured_metadata {
+    values = {
+      event_id       = "event_id",
+      level          = "level",
+      detected_level = "detected_level", 
+      source         = "source",
+      instance       = "computer",
+    }
+  }
+
+  stage.labels {
+    values = {
+      detected_level = "detected_level",
+    }
+  }
+
+  forward_to = [loki.write.default.receiver]
+}
+
+// =============================================================================
+// SECTION 4: SELF-MONITORING
+// =============================================================================
+
+// Monitor Alloy itself
+prometheus.exporter.self "alloy" { }
+
+// Label relabeling for Alloy self-monitoring
+discovery.relabel "alloy_metrics" {
+  targets = prometheus.exporter.self.alloy.targets
+
+  rule {
+    target_label = "instance"
+    replacement  = constants.hostname
+  }
+}
+
+prometheus.scrape "alloy_metrics" {
+  targets    = discovery.relabel.alloy_metrics.output
+  forward_to = [prometheus.remote_write.default.receiver]
+
+  job_name = "alloy-self"
+}

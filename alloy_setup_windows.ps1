@@ -62,8 +62,36 @@ if ($Help) {
     exit 0
 }
 
+function Test-IsVirtualMachine {
+    # Check specifically for Proxmox VM
+    try {
+        $bios = Get-WmiObject -Class Win32_BIOS
+        if ($bios.Manufacturer -match "Proxmox") {
+            Write-LogMessage "Proxmox VM detected via BIOS manufacturer: $($bios.Manufacturer)" "INFO"
+            return $true
+        }
+    } catch {
+        Write-LogMessage "Failed to query BIOS information: $($_.Exception.Message)" "WARNING"
+    }
+    
+    return $false
+}
+
 # Configuration
-$DefaultConfigUrl = "https://github.com/IT-BAER/alloy-aio/raw/main/aio-windows.alloy"
+$IsVM = Test-IsVirtualMachine
+$DefaultConfigUrl = if ($IsVM) {
+    "https://github.com/IT-BAER/alloy-aio/raw/main/aio-windows-logs.alloy"
+} else {
+    "https://github.com/IT-BAER/alloy-aio/raw/main/aio-windows.alloy"
+}
+
+# Show appropriate message based on system type
+if ($IsVM) {
+    Write-LogMessage "Virtual machine detected - installing logs-only configuration" "INFO"
+} else {
+    Write-LogMessage "Physical machine detected - installing full configuration (logs + metrics)" "INFO"
+}
+
 $InstallerUrl = "https://github.com/grafana/alloy/releases/latest/download/alloy-installer-windows-amd64.exe.zip"
 $TempDir = "$env:TEMP\alloy-install"
 $InstallDir = "$env:ProgramFiles\GrafanaLabs\Alloy"
