@@ -128,11 +128,26 @@ def pve_metrics():
                     vmid = guest["vmid"]
                     name = guest.get("name", f"{gtype}{vmid}")
 
+                    # Get guest status
                     st = session.get(
                         f"https://{PROXMOX_HOST}:8006/api2/json/nodes/{node_name}/{gtype}/{vmid}/status/current",
                         verify=VERIFY_SSL).json()["data"]
 
-                    add_guest_metrics(metrics, format_labels(node_name, vmid, name), st)
+                    # Get guest config for OS type
+                    config_resp = session.get(
+                        f"https://{PROXMOX_HOST}:8006/api2/json/nodes/{node_name}/{gtype}/{vmid}/config",
+                        verify=VERIFY_SSL)
+                    
+                    ostype = "unknown"
+                    if config_resp.ok:
+                        config = config_resp.json()["data"]
+                        # For both QEMU and LXC, check for ostype first
+                        ostype = config.get("ostype", "unknown")
+                        # For LXC, also check hostname if ostype is not available
+                        if ostype == "unknown" and gtype == "lxc":
+                            ostype = config.get("hostname", "unknown")
+
+                    add_guest_metrics(metrics, format_labels(node_name, vmid, name, ostype), st)
 
         return Response("\n".join(metrics) + "\n", mimetype="text/plain")
 
