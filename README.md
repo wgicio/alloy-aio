@@ -90,13 +90,21 @@
 > **⚠️ WARNING:** Running the installation script will overwrite the `alloy@pve` Proxmox user and can replace existing Alloy configuration files in `/etc/alloy/`. Back up your configuration if you have made manual changes.
 
 ### 🐧 Linux Installation (Standalone/Host: Logs + Metrics)
+
+First, set your Endpoint URLs:
+
+```bash
+LOKI_URL="https://loki.yourdomain.com/loki/api/v1/push"
+PROMETHEUS_URL="https://prometheus.yourdomain.com/api/v1/write"
+```
+
+Then, run the Setup:
 ```bash
 # 1. Clone the repository (required for local file usage)
 git clone https://github.com/IT-BAER/alloy-aio.git && cd alloy-aio
-```
-```bash
+
 # 2. Run the setup script (auto-detects system type)
-sudo bash alloy_setup.sh --loki-url "https://loki.yourdomain.com/loki/api/v1/push" --prometheus-url "https://prometheus.yourdomain.com/api/v1/write"
+sudo bash alloy_setup.sh --loki-url "$LOKI_URL" --prometheus-url "$PROMETHEUS_URL"
 ```
 
 > **Note:** Metrics are only collected on Standalone/Proxmox Host. In Containers/VMs, only Logs are collected.
@@ -105,11 +113,19 @@ sudo bash alloy_setup.sh --loki-url "https://loki.yourdomain.com/loki/api/v1/pus
 
 ### 🪟 Windows Installation (Logs + Metrics)
 
+First, set your Endpoint URLs:
+
+```powershell
+$LOKI_URL = "https://loki.yourdomain.com/loki/api/v1/push"
+$PROMETHEUS_URL = "https://prometheus.yourdomain.com/api/v1/write"
+```
+
+Then, run the Setup:
 ```powershell
 # Download and run PowerShell Installer (run as Administrator)
 Invoke-WebRequest -Uri "https://github.com/IT-BAER/alloy-aio/raw/main/alloy_setup_windows.ps1" -OutFile "alloy_setup_windows.ps1"
 Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope Process
-.\alloy_setup_windows.ps1 -LokiUrl "https://loki.yourdomain.com/loki/api/v1/push" -PrometheusUrl "https://prometheus.yourdomain.com/api/v1/write"
+.\alloy_setup_windows.ps1 -LokiUrl $LOKI_URL -PrometheusUrl $PROMETHEUS_URL
 ```
 
 <br>
@@ -117,7 +133,13 @@ Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope Process
 ### 📟 Container/Mass Deployment Example
 
 
-| 🏗️ **System Components** | 📊 **Monitoring Capabilities** | 🔧 **Configuration** |
+First, set your Loki URL:
+
+```bash
+LOKI_URL="https://loki.yourdomain.com/loki/api/v1/push"
+```
+
+Then, run the Setup:
 ```bash
 # Clean up any existing directory and clone the latest version
 rm -rf alloy-aio
@@ -125,7 +147,7 @@ git clone https://github.com/IT-BAER/alloy-aio.git
 
 # For each running container, copy files and install Alloy
 for container in $(pct list | awk 'NR>1 && $2=="running" {print $1}'); do
-    echo "Processing container $container..."
+    echo "Processing CT $container..."
     
     # Clean up any existing directory in the container
     pct exec $container -- rm -rf /root/alloy-aio
@@ -140,12 +162,47 @@ for container in $(pct list | awk 'NR>1 && $2=="running" {print $1}'); do
     done
     cd ..
     
-    # Execute the setup script in the container
-    pct exec $container -- bash -c 'cd /root/alloy-aio && bash alloy_setup.sh --loki-url "https://loki.yourdomain.com/loki/api/v1/push"'
+    # Execute the setup script in the container with explicit URL
+    pct exec $container -- env LOKI_URL="$LOKI_URL" bash -c 'cd /root/alloy-aio && bash alloy_setup.sh --loki-url "$LOKI_URL"'
     
-    echo "Completed setup for container $container"
+    echo "Completed setup for CT $container"
 done
 ```
+
+<br>
+
+### 🤖 Proxmox VM Mass Deployment (via Guest Agent)
+> **Note:** This method requires the QEMU Guest Agent to be installed and running on all target VMs.
+
+This one-liner command can be run directly on the Proxmox host shell to automatically detect the OS (Windows/Linux) and deploy Grafana Alloy to all running VMs.
+
+First, set your Endpoint URLs:
+
+```bash
+LOKI_URL="https://loki.yourdomain.com/loki/api/v1/push"
+PROMETHEUS_URL="https://prometheus.yourdomain.com/api/v1/write"
+```
+
+Then, run the Setup:
+
+```bash
+for vmid in $(qm list | awk 'NR>1 && $3=="running" {print $1}'); do 
+    echo "Processing VM $vmid..."; 
+    if qm guest cmd $vmid ping >/dev/null 2>&1; then 
+        if qm guest exec $vmid "cmd.exe" /c ver >/dev/null 2>&1; then 
+            echo "🪟  Windows VM detected..."; 
+            qm guest exec $vmid --timeout 60 powershell.exe "Set-ExecutionPolicy Bypass -Scope Process -Force; \$ProgressPreference = 'SilentlyContinue'; [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; Remove-Item -Path 'C:\WINDOWS\TEMP\alloy-install' -Recurse -Force -ErrorAction SilentlyContinue; Remove-Item -Path 'C:\alloy_setup.ps1' -Force -ErrorAction SilentlyContinue; Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/IT-BAER/alloy-aio/main/alloy_setup_windows.ps1' -OutFile 'C:\alloy_setup.ps1'; & 'C:\alloy_setup.ps1' -LokiUrl '$LOKI_URL' -PrometheusUrl '$PROMETHEUS_URL' -NonInteractive; Remove-Item -Path 'C:\alloy_setup.ps1' -Force -ErrorAction SilentlyContinue;"
+        else 
+            echo "🐧  Linux VM detected..."; 
+            qm guest exec $vmid --timeout 60 -- bash -c "cd /tmp && rm -f alloy_setup.sh && wget -q https://raw.githubusercontent.com/IT-BAER/alloy-aio/main/alloy_setup.sh && chmod +x alloy_setup.sh && DEBIAN_FRONTEND=noninteractive sudo bash alloy_setup.sh --loki-url '$LOKI_URL' --prometheus-url '$PROMETHEUS_URL' --non-interactive && rm -f alloy_setup.sh"
+        fi
+    else 
+        echo "⚠️  QEMU Guest Agent not available for VM $vmid"; 
+    fi
+done
+```
+
+**Before running, make sure to replace the placeholder URLs with your actual Loki and Prometheus endpoints.**
 
 <br>
 
