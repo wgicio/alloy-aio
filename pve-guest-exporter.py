@@ -75,8 +75,8 @@ def proxmox_login():
     return False
 
 
-def format_labels(node_name, vmid, name):
-    return f'node="{node_name}",vmid="{vmid}",name="{name}"'
+def format_labels(node_name, vmid, name, ostype="unknown"):
+    return f'node="{node_name}",vmid="{vmid}",name="{name}",ostype="{ostype}"'
 
 
 def add_guest_metrics(metrics, lbl, st):
