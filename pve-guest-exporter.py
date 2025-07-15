@@ -58,7 +58,7 @@ def proxmox_login():
     user = PROXMOX_USER
     token_name = PROXMOX_TOKEN_NAME
     token_value = PROXMOX_TOKEN_VALUE
-    print(f"DEBUG: user={user} token_name={token_name} token_value={token_value} PVE_API_TOKEN={PVE_API_TOKEN}")
+    #print(f"DEBUG: user={user} token_name={token_name} token_value={token_value} PVE_API_TOKEN={PVE_API_TOKEN}")
     if not (user and token_name and token_value) and PVE_API_TOKEN:
         user, token_name, token_value = parse_pve_api_token(PVE_API_TOKEN)
         print(f"DEBUG: parsed user={user} token_name={token_name} token_value={token_value}")
@@ -138,6 +138,7 @@ def add_guest_metrics(metrics, lbl, st):
         metrics.append(f'proxmox_guest_swap_utilisation{{{lbl}}} {swap_perc}')
 
 
+########### Disabled out for now, due to high cpu usage ############
 def add_guest_disk_usage_metrics(metrics, lbl, node_name, vmid, guest_type):
     """Add guest-internal disk usage metrics."""
     fsinfo = get_guest_disk_usage(node_name, vmid, guest_type)
@@ -219,11 +220,12 @@ def pve_metrics():
 
                     # Add standard hypervisor-level metrics
                     add_guest_metrics(metrics, format_labels(node_name, vmid, name, ostype), st)
-                    
-                    # Add guest-internal disk metrics (QEMU VMs only)
-                    if gtype == "qemu":
-                        add_guest_disk_usage_metrics(metrics, format_labels(node_name, vmid, name, ostype), 
-                                                   node_name, vmid, gtype)
+
+                    ######### Commented out for now, due to high cpu usage #########                    
+                    # # Add guest-internal disk metrics (QEMU VMs only)
+                    # if gtype == "qemu":
+                    #     add_guest_disk_usage_metrics(metrics, format_labels(node_name, vmid, name, ostype), 
+                    #                                node_name, vmid, gtype)
 
         return Response("\n".join(metrics) + "\n", mimetype="text/plain")
 
