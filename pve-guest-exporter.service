@@ -8,7 +8,7 @@ User=alloy
 Group=alloy
 EnvironmentFile=/etc/alloy/pve-guest-exporter.env
 WorkingDirectory=/etc/alloy
-ExecStart=/etc/alloy/pve-guest-exporter-venv/bin/gunicorn --bind 127.0.0.1:9221 pve-guest-exporter:app
+ExecStart=/etc/alloy/pve-guest-exporter-venv/bin/gunicorn --bind 127.0.0.1:9221 --log-level warning pve-guest-exporter:app
 Restart=on-failure
 RestartSec=5s
 
