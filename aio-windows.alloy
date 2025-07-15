@@ -171,7 +171,7 @@ prometheus.exporter.windows "metrics" {
     "time",             // Windows Time Service metrics
     "thermalzone",      // Thermal information
     "pagefile",         // Pagefile usage metrics
-    "logon",            // User logon sessions
+    "terminal_services", // Terminal Services (RDP) metrics and session info (replaces logon collector)
     
   ]
 }
