@@ -232,12 +232,14 @@ function Deploy-Configuration {
         if (-not (Test-Path $regPath)) { New-Item -Path $regPath -Force | Out-Null }
         $currentArgs = (Get-ItemProperty -Path $regPath -Name Arguments -ErrorAction SilentlyContinue).Arguments
         if ($currentArgs) {
-            $newArgs = $currentArgs -replace 'config\.alloy', 'aio-windows.alloy'
+            $configFileName = if ($IsVM) { 'aio-windows-logs.alloy' } else { 'aio-windows.alloy' }
+            $newArgs = $currentArgs -replace '(config|aio-windows|aio-windows-logs)\.alloy', $configFileName
             Set-ItemProperty -Path $regPath -Name Arguments -Value $newArgs -Force
             Write-LogMessage "Registry updated: Arguments = $newArgs" "SUCCESS"
         } else {
-            # If not set, set to default using aio-windows.alloy
-            $defaultArgs = "run`r`nC:\Program Files\GrafanaLabs\Alloy\aio-windows.alloy`r`n--storage.path=C:\ProgramData\GrafanaLabs\Alloy\data"
+            # If not set, set to default using appropriate config file
+            $configFileName = if ($IsVM) { 'aio-windows-logs.alloy' } else { 'aio-windows.alloy' }
+            $defaultArgs = "run`r`nC:\Program Files\GrafanaLabs\Alloy\$configFileName`r`n--storage.path=C:\ProgramData\GrafanaLabs\Alloy\data"
             Set-ItemProperty -Path $regPath -Name Arguments -Value $defaultArgs -Force
             Write-LogMessage "Registry Arguments created: $defaultArgs" "SUCCESS"
         }
