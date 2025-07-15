@@ -5,7 +5,6 @@
  * Simple, working Windows observability configuration using latest Alloy components:
  * 1. TARGETS                    - Loki & Prometheus endpoints
  * 2. WINDOWS EVENT LOGS COLLECTION - Application, System, Security logs
- * 3. SELF-MONITORING            - Alloy self-metrics
  *
  * For more details: https://github.com/IT-BAER/alloy-aio
  * =============================================================================
@@ -114,26 +113,4 @@ loki.process "windows_events" {
   forward_to = [loki.write.default.receiver]
 }
 
-// =============================================================================
-// SECTION 4: SELF-MONITORING
-// =============================================================================
 
-// Monitor Alloy itself
-prometheus.exporter.self "alloy" { }
-
-// Label relabeling for Alloy self-monitoring
-discovery.relabel "alloy_metrics" {
-  targets = prometheus.exporter.self.alloy.targets
-
-  rule {
-    target_label = "instance"
-    replacement  = constants.hostname
-  }
-}
-
-prometheus.scrape "alloy_metrics" {
-  targets    = discovery.relabel.alloy_metrics.output
-  forward_to = [prometheus.remote_write.default.receiver]
-
-  job_name = "alloy-self"
-}
