@@ -119,11 +119,31 @@ Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope Process
 
 | 🏗️ **System Components** | 📊 **Monitoring Capabilities** | 🔧 **Configuration** |
 ```bash
-# Clone the repo on the host, then copy to each container and run locally
+# Clean up any existing directory and clone the latest version
+rm -rf alloy-aio
+git clone https://github.com/IT-BAER/alloy-aio.git
+
+# For each running container, copy files and install Alloy
 for container in $(pct list | awk 'NR>1 && $2=="running" {print $1}'); do
-| Runs as LocalSystem service by default | Smart log filtering (WARNING+ only) | Automated service installation & updates |
-  pct push $container ./alloy-aio /root/alloy-aio -r
-  pct exec $container -- bash -c 'cd /root/alloy-aio && sudo bash alloy_setup.sh --loki-url "https://loki.yourdomain.com/loki/api/v1/push"'
+    echo "Processing container $container..."
+    
+    # Clean up any existing directory in the container
+    pct exec $container -- rm -rf /root/alloy-aio
+    
+    # Create the directory and copy the files
+    pct exec $container -- mkdir -p /root/alloy-aio
+    
+    # Copy each file individually to avoid directory issues
+    cd alloy-aio
+    for file in *; do
+        pct push $container "$file" "/root/alloy-aio/$file"
+    done
+    cd ..
+    
+    # Execute the setup script in the container
+    pct exec $container -- bash -c 'cd /root/alloy-aio && bash alloy_setup.sh --loki-url "https://loki.yourdomain.com/loki/api/v1/push"'
+    
+    echo "Completed setup for container $container"
 done
 ```
 
