@@ -134,7 +134,7 @@ Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope Process
 
 <br>
 
-### 📟 Container/Mass Deployment Example
+### 📟 Proxmox CT Mass Deployment
 
 
 First, set your Loki URL:
