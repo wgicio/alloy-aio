@@ -835,7 +835,7 @@ setup_proxmox_exporter_user_and_token() {
         PROXMOX_OVERRIDE_GRANTED="0"
         return 1
     fi
-    log_success "API token $pve_user!$token_id created (full privileges)"
+    log_success "API token $pve_user!$token_id created"
     # Store token securely
     mkdir -p /etc/alloy
     echo "PVE_API_TOKEN=$pve_user!$token_id=$token_value" > "$env_file"
