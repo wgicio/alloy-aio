@@ -9,7 +9,7 @@ User=alloy
 Group=alloy
 EnvironmentFile=/etc/alloy/pve-guest-exporter/pve-guest-exporter.env
 WorkingDirectory=/etc/alloy/pve-guest-exporter
-ExecStart=/etc/alloy/pve-guest-exporter-venv/bin/gunicorn --bind 127.0.0.1:9221 --workers 1 --threads 1 --timeout 45 --max-requests 500 --preload pve-guest-exporter:app
+ExecStart=/etc/alloy/pve-guest-exporter/pve-guest-exporter-venv/bin/gunicorn --bind 127.0.0.1:9221 --workers 1 --threads 1 --timeout 45 --max-requests 500 --preload pve-guest-exporter:app
 Environment=PYTHONUNBUFFERED=1
 Environment=PYTHONOPTIMIZE=1
 Environment=PYTHONDONTWRITEBYTECODE=1
