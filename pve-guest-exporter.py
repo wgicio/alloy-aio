@@ -396,18 +396,25 @@ def get_all_guest_status(node_name):
                             "maxswap": resource.get("maxswap", 0)
                         }
         
-        # Step 2: Only get individual status for running VMs that need extra data
+        # Step 2: Get individual status for running guests missing critical data OR swap data
         missing_data_count = 0
         for vmid, guest_data in guest_status.items():
             if guest_data.get("status") == "running":
-                # Check if we're missing MULTIPLE critical runtime data points
+                # Check if we're missing critical runtime data
                 missing_critical_data = (
-                    guest_data.get("cpu", 0) == 0 and 
-                    guest_data.get("mem", 0) == 0 and 
+                    guest_data.get("cpu", 0) == 0 and
+                    guest_data.get("mem", 0) == 0 and
                     guest_data.get("uptime", 0) == 0
                 )
                 
-                if missing_critical_data:
+                # Check if swap data is missing (common for both QEMU and LXC)
+                missing_swap_data = (
+                    guest_data.get("swap", 0) == 0 and
+                    guest_data.get("maxswap", 0) == 0
+                )
+                
+                # Make individual call if missing critical data OR swap data
+                if missing_critical_data or missing_swap_data:
                     missing_data_count += 1
                     try:
                         guest_type = guest_data["type"]
@@ -418,12 +425,14 @@ def get_all_guest_status(node_name):
                         
                         if status_resp.ok:
                             status_data = status_resp.json()["data"]
-                            # Update only missing fields
+                            # Update all fields including swap data
                             guest_data.update({
                                 "cpu": status_data.get("cpu", guest_data.get("cpu", 0)),
                                 "uptime": status_data.get("uptime", guest_data.get("uptime", 0)),
                                 "mem": status_data.get("mem", guest_data.get("mem", 0)),
-                                "maxmem": status_data.get("maxmem", guest_data.get("maxmem", 0))
+                                "maxmem": status_data.get("maxmem", guest_data.get("maxmem", 0)),
+                                "swap": status_data.get("swap", guest_data.get("swap", 0)),
+                                "maxswap": status_data.get("maxswap", guest_data.get("maxswap", 0))
                             })
                             
                     except Exception as e:
