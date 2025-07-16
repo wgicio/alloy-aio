@@ -758,7 +758,7 @@ setup_proxmox_exporter_user_and_token() {
     log "Setting up Proxmox API user, role, and token for exporter..."
     local pve_user="alloy@pve"
     local token_id="$(hostname)"
-    local env_file="/etc/alloy/pve-guest-exporter.env"
+    local env_file="/etc/alloy/pve-guest-exporter/pve-guest-exporter.env"
     local token_value=""
     PROXMOX_OVERRIDE_GRANTED="1" # Default: do all actions
 
@@ -801,17 +801,13 @@ setup_proxmox_exporter_user_and_token() {
         log_success "AlloyMonitor role assigned to $pve_user."
     fi
 
-    # Only create the per-host token if it does not exist
+    # Force delete existing token if it exists (overwrite behavior)
     if pveum user token list "$pve_user" | grep '^│' | grep -v 'tokenid' | awk '{print $2}' | grep -Fxq "$token_id"; then
-        log_success "API token $pve_user!$token_id already exists. Reusing existing token."
-        # Try to fetch the token value (not possible via CLI, so instruct user to copy manually if needed)
-        log_warning "If you do not have the token value, you must recreate the token manually in the Proxmox UI or CLI."
-        log_warning "The installer cannot retrieve the token value for existing tokens due to Proxmox API limitations."
-        log_warning "If you need to regenerate the token, delete it in the Proxmox UI or with: pveum user token delete $pve_user $token_id"
-        log_warning "Then re-run this installer."
-        PROXMOX_OVERRIDE_GRANTED="1"
-        return 0
+        log "Deleting existing API token $pve_user!$token_id to create fresh token..."
+        pveum user token delete "$pve_user" "$token_id" 2>/dev/null || true
+        log_success "Existing token deleted"
     fi
+
     token_output=$(pveum user token add "$pve_user" "$token_id" --privsep 0 2>&1)
     # Try to extract the token value from the Proxmox table output
     token_value=""
@@ -836,8 +832,10 @@ setup_proxmox_exporter_user_and_token() {
         return 1
     fi
     log_success "API token $pve_user!$token_id created"
-    # Store token securely
-    mkdir -p /etc/alloy
+
+    # Store token securely in dedicated directory
+    mkdir -p /etc/alloy/pve-guest-exporter
+    local env_file="/etc/alloy/pve-guest-exporter/pve-guest-exporter.env"
     echo "PVE_API_TOKEN=$pve_user!$token_id=$token_value" > "$env_file"
     chown root:alloy "$env_file"
     chmod 640 "$env_file"
@@ -853,8 +851,11 @@ setup_proxmox_exporter_service() {
     fi
     log "Setting up Proxmox guest metrics exporter systemd service..."
 
+    # Create dedicated directory for pve-guest-exporter
+    mkdir -p /etc/alloy/pve-guest-exporter
+
     local exporter_py_src="$(dirname "$0")/pve-guest-exporter.py"
-    local exporter_py_dst="/etc/alloy/pve-guest-exporter.py"
+    local exporter_py_dst="/etc/alloy/pve-guest-exporter/pve-guest-exporter.py"
     local service_file_src="$(dirname "$0")/pve-guest-exporter.service"
     local service_file_dst="/etc/systemd/system/pve-guest-exporter.service"
 

@@ -1,16 +1,24 @@
 [Unit]
 Description=Proxmox Guest Metrics Exporter (for Alloy)
-After=network.target
+After=network.target alloy.service
+Wants=network.target
 
 [Service]
 Type=simple
 User=alloy
 Group=alloy
-EnvironmentFile=/etc/alloy/pve-guest-exporter.env
-WorkingDirectory=/etc/alloy
-ExecStart=/etc/alloy/pve-guest-exporter-venv/bin/gunicorn --bind 127.0.0.1:9221 pve-guest-exporter:app
+EnvironmentFile=/etc/alloy/pve-guest-exporter/pve-guest-exporter.env
+WorkingDirectory=/etc/alloy/pve-guest-exporter
+ExecStart=/etc/alloy/pve-guest-exporter-venv/bin/gunicorn --bind 127.0.0.1:9221 --workers 1 --threads 1 --timeout 45 --max-requests 500 --preload pve-guest-exporter:app
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONOPTIMIZE=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+LimitNOFILE=65536
+LimitNPROC=2048
 Restart=on-failure
-RestartSec=5s
+RestartSec=30s
+StartLimitInterval=300s
+StartLimitBurst=3
 
 [Install]
 WantedBy=multi-user.target
