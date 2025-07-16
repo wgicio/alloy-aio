@@ -287,7 +287,7 @@ install_prerequisites() {
 
     # For Proxmox hosts only, create a virtualenv for the exporter and install dependencies with pip
     if [[ "$SYSTEM_TYPE" == "proxmox-host" ]]; then
-        local venv_dir="/etc/alloy/pve-guest-exporter-venv"
+        local venv_dir="/etc/alloy/pve-guest-exporter/pve-guest-exporter-venv"
         if [[ ! -d "$venv_dir" ]]; then
             run_with_spinner "python3 -m venv $venv_dir" "Creating Python virtualenv for exporter..." || error_exit "Failed to create virtualenv for exporter"
         fi
