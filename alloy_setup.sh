@@ -500,42 +500,46 @@ deploy_configuration() {
 
 # Configure Alloy service defaults
 configure_alloy_defaults() {
-    log "Configuring Alloy service defaults..."
-    
-    local defaults_file="/etc/default/alloy"
-    
-
-    # Create or update the defaults file
-    if [[ -f "$defaults_file" ]]; then
-        log "Updating existing defaults file..."
-        # Update existing CONFIG_FILE if it exists, otherwise add it
-        if grep -q "^CONFIG_FILE=" "$defaults_file"; then
-            sed -i "s|^CONFIG_FILE=.*|CONFIG_FILE=\"$ALLOY_CONFIG_FILE\"|" "$defaults_file"
-        else
-            echo "CONFIG_FILE=\"$ALLOY_CONFIG_FILE\"" >> "$defaults_file"
-        fi
-    else
-        log "Creating new defaults file..."
-        cat > "$defaults_file" << EOF
+	log "Configuring Alloy service defaults..."
+	local defaults_file="/etc/default/alloy"
+	# Create or update the defaults file
+	if [[ -f "$defaults_file" ]]; then
+		log "Updating existing defaults file..."
+		# Update existing CONFIG_FILE if it exists, otherwise add it
+		if grep -q "^CONFIG_FILE=" "$defaults_file"; then
+			sed -i "s|^CONFIG_FILE=.*|CONFIG_FILE=\"$ALLOY_CONFIG_FILE\"|" "$defaults_file"
+		else
+			echo "CONFIG_FILE=\"$ALLOY_CONFIG_FILE\"" >> "$defaults_file"
+		fi
+		
+		# Update or add CUSTOM_ARGS with --disable-reporting
+		if grep -q "^CUSTOM_ARGS=" "$defaults_file"; then
+			sed -i "s|^CUSTOM_ARGS=.*|CUSTOM_ARGS=\"--disable-reporting\"|" "$defaults_file"
+		else
+			echo "CUSTOM_ARGS=\"--disable-reporting\"" >> "$defaults_file"
+		fi
+	else
+		log "Creating new defaults file..."
+		cat > "$defaults_file" << EOF
 # Configuration file for Grafana Alloy
 CONFIG_FILE="$ALLOY_CONFIG_FILE"
 
-# Additional command-line arguments (optional)
-# CUSTOM_ARGS="--server.http.listen-addr=0.0.0.0:12345"
+# Additional command-line arguments
+CUSTOM_ARGS="--disable-reporting"
 EOF
-    fi
-    
-    # Add environment variables for runtime
-    log "Adding environment variables to defaults file..."
-    cat >> "$defaults_file" << EOF
+	fi
+
+	# Add environment variables for runtime
+	log "Adding environment variables to defaults file..."
+	cat >> "$defaults_file" << EOF
 
 # System type and configuration
 SYSTEM_TYPE="$SYSTEM_TYPE"
 EOF
-    
-    # Set proper permissions
-    chmod 644 "$defaults_file" || error_exit "Failed to set permissions on defaults file"
-    log_success "Alloy service defaults configured: $defaults_file"
+
+	# Set proper permissions
+	chmod 644 "$defaults_file" || error_exit "Failed to set permissions on defaults file"
+	log_success "Alloy service defaults configured with --disable-reporting: $defaults_file"
 }
 
 # Helper: 5s spinner and stability check for a systemd service

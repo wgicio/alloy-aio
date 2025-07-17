@@ -239,7 +239,7 @@ function Deploy-Configuration {
         } else {
             # If not set, set to default using appropriate config file
             $configFileName = if ($IsVM) { 'aio-windows-logs.alloy' } else { 'aio-windows.alloy' }
-            $defaultArgs = "run`r`nC:\Program Files\GrafanaLabs\Alloy\$configFileName`r`n--storage.path=C:\ProgramData\GrafanaLabs\Alloy\data"
+            $defaultArgs = "run`r`nC:\Program Files\GrafanaLabs\Alloy\$configFileName`r`n--storage.path=C:\ProgramData\GrafanaLabs\Alloy\data`r `n--disable-reporting"
             Set-ItemProperty -Path $regPath -Name Arguments -Value $defaultArgs -Force
             Write-LogMessage "Registry Arguments created: $defaultArgs" "SUCCESS"
         }
