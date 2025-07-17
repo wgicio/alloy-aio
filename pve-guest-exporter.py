@@ -445,6 +445,102 @@ def get_all_guest_status(node_name):
         print(f"Error getting guest status for {node_name}: {e}")
         return {}
 
+def write_storage_metrics(buf):
+    """Add storage pool metrics for all nodes."""
+    try:
+        # Get storage information
+        storage_resp = session.get(
+            f"https://{PROXMOX_HOST}:8006/api2/json/cluster/resources",
+            verify=VERIFY_SSL, timeout=10
+        )
+        
+        if storage_resp.ok:
+            resources = storage_resp.json()["data"]
+            print(f"Got cluster resources for storage metrics")
+            
+            for resource in resources:
+                if resource.get("type") == "storage":
+                    node = resource.get("node", "unknown")
+                    storage_id = resource.get("storage", "unknown")
+                    
+                    # Storage metrics with labels
+                    labels = f'node="{node}",storage="{storage_id}"'
+                    
+                    # Total, used, and available space
+                    total = resource.get("maxdisk", 0)
+                    used = resource.get("disk", 0)
+                    available = total - used if total > used else 0
+                    
+                    # Status (1 for available, 0 for unavailable)
+                    status = 1 if resource.get("status") == "available" else 0
+                    
+                    buf.append(f'proxmox_storage_total_bytes{{{labels}}} {total}')
+                    buf.append(f'proxmox_storage_used_bytes{{{labels}}} {used}')
+                    buf.append(f'proxmox_storage_available_bytes{{{labels}}} {available}')
+                    buf.append(f'proxmox_storage_status{{{labels}}} {status}')
+                    
+                    # Utilization percentage
+                    if total > 0:
+                        utilization = used / total
+                        buf.append(f'proxmox_storage_utilization{{{labels}}} {utilization}')
+        else:
+            print(f"Storage metrics API failed: {storage_resp.status_code}")
+            
+    except Exception as e:
+        print(f"Error getting storage metrics: {e}")
+
+def write_ceph_cluster_metrics(buf):
+    """Add cluster-wide Ceph metrics."""
+    try:
+        # Cluster Ceph status
+        status_resp = session.get(
+            f"https://{PROXMOX_HOST}:8006/api2/json/cluster/ceph/status",
+            verify=VERIFY_SSL, timeout=10
+        )
+        
+        if status_resp.ok:
+            status = status_resp.json().get("data", {})
+            print(f"Got Ceph cluster status: {list(status.keys())}")
+            
+            # Health status
+            health = status.get("health", {})
+            if "status" in health:
+                # Set value to 1 for the current active status
+                buf.append(f'proxmox_ceph_cluster_health{{status="{health["status"]}"}} 1')
+            
+            # PG map statistics
+            pgmap = status.get("pgmap", {})
+            if pgmap:
+                if "bytes_total" in pgmap:
+                    buf.append(f'proxmox_ceph_cluster_total_bytes{{cluster="ceph"}} {pgmap["bytes_total"]}')
+                if "bytes_used" in pgmap:
+                    buf.append(f'proxmox_ceph_cluster_used_bytes{{cluster="ceph"}} {pgmap["bytes_used"]}')
+                if "bytes_avail" in pgmap:
+                    buf.append(f'proxmox_ceph_cluster_available_bytes{{cluster="ceph"}} {pgmap["bytes_avail"]}')
+                if "num_pgs" in pgmap:
+                    buf.append(f'proxmox_ceph_cluster_pgs_total{{cluster="ceph"}} {pgmap["num_pgs"]}')
+            
+            # Monitor status
+            monmap = status.get("monmap", {})
+            if "mons" in monmap:
+                buf.append(f'proxmox_ceph_monitors_total{{cluster="ceph"}} {len(monmap["mons"])}')
+            
+            # OSD status
+            osdmap = status.get("osdmap", {})
+            if osdmap:
+                if "num_osds" in osdmap:
+                    buf.append(f'proxmox_ceph_osds_total{{cluster="ceph"}} {osdmap["num_osds"]}')
+                if "num_up_osds" in osdmap:
+                    buf.append(f'proxmox_ceph_osds_up{{cluster="ceph"}} {osdmap["num_up_osds"]}')
+                if "num_in_osds" in osdmap:
+                    buf.append(f'proxmox_ceph_osds_in{{cluster="ceph"}} {osdmap["num_in_osds"]}')
+        else:
+            print(f"Ceph cluster status API failed: {status_resp.status_code}")
+            
+    except Exception as e:
+        print(f"Error getting Ceph cluster metrics: {e}")
+
+
 # Metrics endpoint
 @app.route("/pve")
 def pve_metrics():
@@ -514,8 +610,20 @@ def pve_metrics():
             # Break after processing local node (no need to check other nodes)
             break
 
-        return Response("\n".join(all_metrics) + "\n", mimetype="text/plain")
+        # Add storage and Ceph metrics
+        buf = []
         
+        # Add storage metrics
+        write_storage_metrics(buf)
+        
+        # Add Ceph metrics (only if Ceph is available)
+        write_ceph_cluster_metrics(buf)
+        
+        # Combine guest metrics with storage/ceph metrics
+        all_metrics.extend(buf)
+
+        return Response("\n".join(all_metrics) + "\n", mimetype="text/plain")
+
     except Exception as e:
         print(f"Error in pve_metrics: {e}")
         tb = traceback.format_exc()
