@@ -352,18 +352,42 @@ ensure_alloy_user() {
     fi
 }
 
-# Configure user permissions
+# Configure user permissions using ACL
 setup_permissions() {
-    ensure_alloy_user
-    usermod -aG adm alloy
-    usermod -aG systemd-journal alloy
-    if command -v setfacl &> /dev/null; then
-        setfacl -R -m u:alloy:rx /var/log/
-        setfacl -R -d -m u:alloy:rx /var/log/
-        log_success "ACL permissions configured"
-    fi
-    log_success "Linux user permissions configured"
+	ensure_alloy_user
+	
+	if command -v setfacl &> /dev/null; then
+		log "Configuring ACL permissions for log files (current and future)..."
+		
+		# Grant read+execute access to /var/log directory for traversal
+		setfacl -m u:alloy:rx /var/log/
+		
+		# Grant read+execute access to all existing files and directories recursively
+		# (directories need 'x' for traversal, files will ignore 'x' for reading)
+		setfacl -R -m u:alloy:rx /var/log/
+		
+		# Set default ACL on /var/log and all subdirectories so new files/directories 
+		# automatically inherit alloy:rx permissions
+		setfacl -d -m u:alloy:rx /var/log/
+		setfacl -R -d -m u:alloy:rx /var/log/
+		
+		log_success "ACL permissions configured for current and future log files"
+		
+		# Verify ACL setup
+		if getfacl /var/log 2>/dev/null | grep -q "user:alloy:r-x"; then
+			log_success "✓ ACL verification: alloy user has access to /var/log"
+		else
+			log_warning "⚠ ACL verification: Could not verify alloy user access"
+		fi
+		
+	else
+		log_warning "setfacl command not available - ACL permissions cannot be configured"
+		log_warning "Install 'acl' package: apt-get install acl"
+	fi
+	
+	log_success "User permissions configured using ACL-only approach"
 }
+
 
 # Deploy configuration
 deploy_configuration() {
