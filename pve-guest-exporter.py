@@ -19,6 +19,27 @@ from threading import Lock
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
+_logged_errors = set()  # Track all errors that have been logged
+_error_lock = Lock()    # Thread safety for error logging
+
+def log_error_once(error_key, message):
+    """Log an error message only once per unique error"""
+    global _logged_errors
+    
+    with _error_lock:
+        if error_key not in _logged_errors:
+            print(message)
+            _logged_errors.add(error_key)
+            return True
+        return False
+
+def clear_error_log(error_key):
+    """Clear error log when operation succeeds (for recovery detection)"""
+    global _logged_errors
+    
+    with _error_lock:
+        _logged_errors.discard(error_key)
+
 # Config
 PROXMOX_HOST = os.environ.get("PROXMOX_HOST", "localhost")
 PROXMOX_PASS = os.environ.get("PROXMOX_PASS", "")
@@ -143,7 +164,7 @@ def authenticate():
     return False
 
 def get_vm_config_cached(node_name, vmid, guest_type):
-    """Cache static VM config data only"""
+    """Cache static VM config data with one-time error logging"""
     cache_key = f"{node_name}:{guest_type}:{vmid}"
     current_time = time.time()
     
@@ -155,7 +176,7 @@ def get_vm_config_cached(node_name, vmid, guest_type):
     try:
         resp = session.get(
             f"https://{PROXMOX_HOST}:8006/api2/json/nodes/{node_name}/{guest_type}/{vmid}/config",
-            verify=VERIFY_SSL, timeout=2
+            verify=VERIFY_SSL, timeout=3
         )
         if resp.ok:
             config = resp.json()["data"]
@@ -169,14 +190,25 @@ def get_vm_config_cached(node_name, vmid, guest_type):
             
             result = {"ostype": ostype, "cpus": cpus}
             _config_cache[cache_key] = (result, current_time)
+            
+            # Clear error log on success
+            clear_error_log(f"config_api_error:{node_name}:{vmid}")
             return result
-    except Exception:
-        pass
+        else:
+            # Log API error only once
+            error_key = f"config_api_error:{node_name}:{vmid}"
+            log_error_once(error_key, f"VM config API failed for {vmid}: {resp.status_code}")
+            
+    except Exception as e:
+        # Log API errors only once
+        error_key = f"config_api_error:{node_name}:{vmid}"
+        log_error_once(error_key, f"VM config API failed for {vmid}: {e}")
     
     return {"ostype": "unknown", "cpus": 0}
 
+
 def get_guest_disk_usage_cached(node_name, vmid, guest_type):
-    """Cache expensive guest agent disk usage calls"""
+    """Cache expensive guest agent disk usage calls with one-time error logging"""
     if guest_type != "qemu":
         return None
     
@@ -197,18 +229,47 @@ def get_guest_disk_usage_cached(node_name, vmid, guest_type):
             json_data = resp.json()
             if isinstance(json_data, dict) and "data" in json_data:
                 result_data = json_data["data"]
+                
+                # Handle guest agent errors gracefully
+                if isinstance(result_data, dict) and "error" in result_data:
+                    error = result_data["error"]
+                    error_class = error.get("class", "Unknown")
+                    error_desc = error.get("desc", "Unknown error")
+                    
+                    # Log error only once per VM
+                    error_key = f"disk_agent_error:{node_name}:{vmid}"
+                    log_error_once(error_key, f"Guest agent unavailable for VM {vmid}: {error_class} - {error_desc}")
+                    
+                    _disk_usage_cache[cache_key] = (None, current_time)
+                    return None
+                
+                # Handle successful response
                 if isinstance(result_data, dict) and "result" in result_data:
                     disk_usage = result_data["result"]
-                    _disk_usage_cache[cache_key] = (disk_usage, current_time)
-                    return disk_usage
-    except Exception:
-        pass
+                    if isinstance(disk_usage, list):
+                        # Clear error log on success
+                        clear_error_log(f"disk_agent_error:{node_name}:{vmid}")
+                        clear_error_log(f"disk_api_error:{node_name}:{vmid}")
+                        _disk_usage_cache[cache_key] = (disk_usage, current_time)
+                        return disk_usage
+                    else:
+                        # Log format error only once per VM
+                        error_key = f"disk_format_error:{node_name}:{vmid}"
+                        log_error_once(error_key, f"Invalid disk usage format for VM {vmid}: expected list, got {type(disk_usage)}")
+                        _disk_usage_cache[cache_key] = (None, current_time)
+                        return None
+                        
+    except Exception as e:
+        # Log API errors only once per VM
+        error_key = f"disk_api_error:{node_name}:{vmid}"
+        log_error_once(error_key, f"Disk usage API failed for VM {vmid}: {e}")
     
     _disk_usage_cache[cache_key] = (None, current_time)
     return None
 
+
 def get_storage_metrics_cached():
-    """Cache storage metrics (change slowly)"""
+    """Cache storage metrics with one-time error logging"""
     current_time = time.time()
     
     if "storage" in _storage_cache:
@@ -240,14 +301,25 @@ def get_storage_metrics_cached():
                         f'proxmox_storage_available_bytes{{{labels}}} {available}',
                         f'proxmox_storage_status{{{labels}}} {status}'
                     ])
-    except Exception:
-        pass
+            
+            # Clear error log on success
+            clear_error_log("storage_api_error")
+        else:
+            # Log API error only once
+            error_key = "storage_api_error"
+            log_error_once(error_key, f"Storage metrics API failed: {resp.status_code}")
+            
+    except Exception as e:
+        # Log API errors only once
+        error_key = "storage_api_error"
+        log_error_once(error_key, f"Storage metrics API failed: {e}")
     
     _storage_cache["storage"] = (metrics, current_time)
     return metrics
 
+
 def get_ceph_metrics_cached():
-    """Cache Ceph metrics (change slowly)"""
+    """Cache Ceph metrics with one-time error logging"""
     current_time = time.time()
     
     if "ceph" in _ceph_cache:
@@ -294,8 +366,18 @@ def get_ceph_metrics_cached():
                     metrics.append(f'proxmox_ceph_osds_up{{cluster="ceph"}} {osdmap["num_up_osds"]}')
                 if "num_in_osds" in osdmap:
                     metrics.append(f'proxmox_ceph_osds_in{{cluster="ceph"}} {osdmap["num_in_osds"]}')
-    except Exception:
-        pass
+            
+            # Clear error log on success
+            clear_error_log("ceph_api_error")
+        else:
+            # Log API error only once
+            error_key = "ceph_api_error"
+            log_error_once(error_key, f"Ceph metrics API failed: {resp.status_code}")
+            
+    except Exception as e:
+        # Log API errors only once
+        error_key = "ceph_api_error"
+        log_error_once(error_key, f"Ceph metrics API failed: {e}")
     
     _ceph_cache["ceph"] = (metrics, current_time)
     return metrics
@@ -376,7 +458,7 @@ def get_realtime_guest_status(node_name):
                         guest_type = data["type"]
                         status_resp = session.get(
                             f"https://{PROXMOX_HOST}:8006/api2/json/nodes/{node_name}/{guest_type}/{vmid}/status/current",
-                            verify=VERIFY_SSL, timeout=1
+                            verify=VERIFY_SSL, timeout=3
                         )
                         if status_resp.ok:
                             status_data = status_resp.json()["data"]
@@ -396,12 +478,12 @@ def get_realtime_guest_status(node_name):
         return {}
 
 def get_host_resources_realtime(node_name):
-    """Get real-time host-level resource metrics - no caching"""
+    """Get real-time host-level resource metrics with one-time error logging"""
     metrics = []
     try:
         resp = session.get(
             f"https://{PROXMOX_HOST}:8006/api2/json/nodes/{node_name}/status",
-            verify=VERIFY_SSL, timeout=3  # Reduced timeout for faster response
+            verify=VERIFY_SSL, timeout=3
         )
         if resp.ok:
             status = resp.json()["data"]
@@ -430,8 +512,18 @@ def get_host_resources_realtime(node_name):
                     f'proxmox_host_storage_total_bytes{{{labels}}} {rootfs["total"]}',
                     f'proxmox_host_storage_available_bytes{{{labels}}} {rootfs["avail"]}'
                 ])
-    except Exception:
-        pass
+            
+            # Clear error log on success
+            clear_error_log(f"host_api_error:{node_name}")
+        else:
+            # Log API error only once
+            error_key = f"host_api_error:{node_name}"
+            log_error_once(error_key, f"Host metrics API failed for {node_name}: {resp.status_code}")
+            
+    except Exception as e:
+        # Log API errors only once
+        error_key = f"host_api_error:{node_name}"
+        log_error_once(error_key, f"Host metrics API failed for {node_name}: {e}")
     
     return metrics
 
