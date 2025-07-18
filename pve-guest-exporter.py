@@ -1,22 +1,20 @@
 #!/usr/bin/env python3
 
 """
-Proxmox guest metrics exporter for Prometheus (OPTIMIZED)
-- Authenticates to local Proxmox API
-- Exposes guest metrics at http://localhost:9221/pve
-- Provides comprehensive metrics including CPU, memory, disk, network, utilization stats, swap, OS info
-- Requires: requests, flask
+Proxmox guest metrics exporter for Prometheus (PERFORMANCE OPTIMIZED)
+- Real-time critical metrics, cached non-critical metrics
+- Minimal CPU usage while maintaining essential real-time data
 """
 
 import os
 import requests
 import traceback
 import time
+import socket
 from functools import lru_cache
 from flask import Flask, Response
 import urllib3
 import logging
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from threading import Lock
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -27,48 +25,34 @@ PROXMOX_PASS = os.environ.get("PROXMOX_PASS", "")
 VERIFY_SSL = False
 PORT = 9221
 
-# Support both split and single env var for API token
+# Environment variables
 PVE_API_TOKEN = os.environ.get("PVE_API_TOKEN")
 PROXMOX_USER = os.environ.get("PROXMOX_USER")
 PROXMOX_TOKEN_NAME = os.environ.get("PROXMOX_TOKEN_NAME")
 PROXMOX_TOKEN_VALUE = os.environ.get("PROXMOX_TOKEN_VALUE")
 
-# Load environment variables from dedicated config file
 def load_env_file():
     env_file = "/etc/alloy/pve-guest-exporter/pve-guest-exporter.env"
-    max_retries = 3
-    retry_delay = 1
-    
-    for attempt in range(max_retries):
-        if os.path.exists(env_file):
-            try:
-                with open(env_file, 'r') as f:
-                    for line in f:
-                        line = line.strip()
-                        if line and not line.startswith('#') and '=' in line:
-                            key, value = line.split('=', 1)
-                            os.environ[key] = value
-                return True
-            except Exception as e:
-                print(f"Error reading env file: {e}")
-        
-        if attempt < max_retries - 1:
-            print(f"Env file not ready, retrying in {retry_delay}s...")
-            time.sleep(retry_delay)
-    
-    return False
+    if os.path.exists(env_file):
+        try:
+            with open(env_file, 'r') as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith('#') and '=' in line:
+                        key, value = line.split('=', 1)
+                        os.environ[key] = value
+        except Exception:
+            pass
 
-# Load environment file at startup
 load_env_file()
 
-# Reload environment variables after loading file
+# Reload environment variables
 PVE_API_TOKEN = os.environ.get("PVE_API_TOKEN")
 PROXMOX_USER = os.environ.get("PROXMOX_USER")
 PROXMOX_TOKEN_NAME = os.environ.get("PROXMOX_TOKEN_NAME")
 PROXMOX_TOKEN_VALUE = os.environ.get("PROXMOX_TOKEN_VALUE")
 
 def parse_pve_api_token(token):
-    """Parse PVE API token format: user@realm!tokenid=uuid"""
     try:
         if not token:
             return None, None, None
@@ -80,558 +64,450 @@ def parse_pve_api_token(token):
 
 app = Flask(__name__)
 
-# Suppress Flask and Werkzeug debug/info logs in production
+# Suppress Flask logs
 logging.getLogger('werkzeug').setLevel(logging.WARNING)
 logging.getLogger('flask').setLevel(logging.WARNING)
 
-# Optimized session with connection pooling
+# Optimized session - reduced overhead
 session = requests.Session()
-session.headers.update({
-    'Connection': 'keep-alive',
-    'Keep-Alive': 'timeout=60, max=100'
-})
-
-# Configure connection pool
+session.headers.update({'Connection': 'keep-alive'})
 adapter = requests.adapters.HTTPAdapter(
-    pool_connections=20,
-    pool_maxsize=50,
-    max_retries=2,
+    pool_connections=8,    # Reduced from 20
+    pool_maxsize=15,       # Reduced from 50
+    max_retries=1,         # Reduced from 2
     pool_block=False
 )
 session.mount('https://', adapter)
 
+# Optimized caching - separate real-time from cached data
+_config_cache = {}
+_disk_usage_cache = {}
+_storage_cache = {}
+_ceph_cache = {}
+_auth_cache = {"valid_until": 0}
+_hostname_cache = None
+_swap_rotation_index = 0
+_swap_data_cache = {}
 
-# Global caches
-os_type_cache = {}
-OS_TYPE_CACHE_TTL = 300
-auth_valid_until = 0
-auth_lock = Lock()
-disk_usage_cache = {} 
-DISK_USAGE_CACHE_TTL = 60
+# Cache TTLs
+CONFIG_CACHE_TTL = 600       
+DISK_USAGE_CACHE_TTL = 30
+STORAGE_CACHE_TTL = 60
+CEPH_CACHE_TTL = 30
+AUTH_TTL = 3600
+SWAP_CACHE_TTL = 60
 
-@lru_cache(maxsize=2000)
-def get_cached_vm_config(node_name, vmid, guest_type, cache_time_slot):
-    """Cache VM config data (OS type and CPU count) for 5 minutes"""
+def get_hostname():
+    global _hostname_cache
+    if _hostname_cache is None:
+        _hostname_cache = socket.gethostname()
+    return _hostname_cache
+
+def authenticate():
+    """Optimized authentication with caching"""
+    current_time = time.time()
+    
+    if current_time < _auth_cache["valid_until"]:
+        return True
+    
+    # Try API token first (fastest)
+    user = PROXMOX_USER
+    token_name = PROXMOX_TOKEN_NAME
+    token_value = PROXMOX_TOKEN_VALUE
+    
+    if not (user and token_name and token_value) and PVE_API_TOKEN:
+        user, token_name, token_value = parse_pve_api_token(PVE_API_TOKEN)
+    
+    if user and token_name and token_value:
+        session.headers["Authorization"] = f"PVEAPIToken={user}!{token_name}={token_value}"
+        _auth_cache["valid_until"] = current_time + AUTH_TTL
+        return True
+    
+    # Fallback to password auth
+    if PROXMOX_PASS and PROXMOX_USER:
+        try:
+            resp = session.post(
+                f"https://{PROXMOX_HOST}:8006/api2/json/access/ticket",
+                data={"username": PROXMOX_USER, "password": PROXMOX_PASS},
+                verify=VERIFY_SSL, timeout=5
+            )
+            if resp.ok:
+                data = resp.json()["data"]
+                session.cookies.set("PVEAuthCookie", data["ticket"])
+                session.headers["CSRFPreventionToken"] = data["CSRFPreventionToken"]
+                _auth_cache["valid_until"] = current_time + AUTH_TTL
+                return True
+        except Exception:
+            pass
+    
+    return False
+
+def get_vm_config_cached(node_name, vmid, guest_type):
+    """Cache static VM config data only"""
     cache_key = f"{node_name}:{guest_type}:{vmid}"
     current_time = time.time()
     
-    # Check in-memory cache first
-    if cache_key in os_type_cache:
-        cached_data, timestamp = os_type_cache[cache_key]
-        if current_time - timestamp < OS_TYPE_CACHE_TTL:
-            return cached_data
+    if cache_key in _config_cache:
+        data, timestamp = _config_cache[cache_key]
+        if current_time - timestamp < CONFIG_CACHE_TTL:
+            return data
     
-    # Fetch fresh config data
     try:
-        config_resp = session.get(
+        resp = session.get(
             f"https://{PROXMOX_HOST}:8006/api2/json/nodes/{node_name}/{guest_type}/{vmid}/config",
-            verify=VERIFY_SSL, timeout=3
+            verify=VERIFY_SSL, timeout=2
         )
-        
-        ostype = "unknown"
-        cpus = 0
-        
-        if config_resp.ok:
-            config = config_resp.json()["data"]
-            
-            # Get OS type
+        if resp.ok:
+            config = resp.json()["data"]
             ostype = config.get("ostype", "unknown")
             if ostype == "unknown" and guest_type == "lxc":
                 ostype = config.get("hostname", "unknown")
             
-            # Get CPU count
+            cpus = config.get("cores", 1)
             if guest_type == "qemu":
-                # For QEMU VMs
-                cpus = config.get("cores", 1) * config.get("sockets", 1)
-            else:
-                # For LXC containers
-                cpus = config.get("cores", 1)
-        
-        # Cache both values
-        result = {"ostype": ostype, "cpus": cpus}
-        os_type_cache[cache_key] = (result, current_time)
-        return result
-        
-    except Exception:
-        # Return cached value if API fails
-        if cache_key in os_type_cache:
-            return os_type_cache[cache_key][0]
-        return {"ostype": "unknown", "cpus": 0}
-
-def proxmox_login():
-    """Optimized authentication with caching"""
-    global auth_valid_until
-    
-    with auth_lock:
-        current_time = time.time()
-        
-        # Check if we have valid authentication
-        if current_time < auth_valid_until:
-            return True
-        
-        # Prefer split env vars, fallback to PVE_API_TOKEN
-        user = PROXMOX_USER
-        token_name = PROXMOX_TOKEN_NAME
-        token_value = PROXMOX_TOKEN_VALUE
-
-        if not (user and token_name and token_value) and PVE_API_TOKEN:
-            user, token_name, token_value = parse_pve_api_token(PVE_API_TOKEN)
-
-        if user and token_name and token_value:
-            session.headers["Authorization"] = f"PVEAPIToken={user}!{token_name}={token_value}"
-            auth_valid_until = current_time + 3600  # Valid for 1 hour
-            return True
-        elif PROXMOX_PASS and PROXMOX_USER:
-            try:
-                resp = session.post(
-                    f"https://{PROXMOX_HOST}:8006/api2/json/access/ticket",
-                    data={"username": PROXMOX_USER, "password": PROXMOX_PASS},
-                    verify=VERIFY_SSL,
-                    timeout=10
-                )
-                if resp.ok:
-                    data = resp.json()["data"]
-                    session.cookies.set("PVEAuthCookie", data["ticket"])
-                    session.headers["CSRFPreventionToken"] = data["CSRFPreventionToken"]
-                    auth_valid_until = current_time + 3600
-                    return True
-            except Exception as e:
-                print(f"Password authentication failed: {e}")
-        
-        return False
-
-def format_labels(node_name, vmid, name, ostype="unknown"):
-    """Pre-format labels for metrics"""
-    return f'node="{node_name}",vmid="{vmid}",name="{name}",ostype="{ostype}"'
-
-def get_guest_disk_usage(node_name, vmid, guest_type):
-    """Get actual disk usage from inside the guest using QEMU agent."""
-    if guest_type != "qemu":
-        return None
-    
-    try:
-        url = f"https://{PROXMOX_HOST}:8006/api2/json/nodes/{node_name}/qemu/{vmid}/agent/get-fsinfo"
-        fsinfo_resp = session.get(url, verify=VERIFY_SSL, timeout=10)
-        
-        if fsinfo_resp.status_code == 200:
-            json_data = fsinfo_resp.json()
-            # FIX: Access the nested 'result' array inside 'data'
-            if isinstance(json_data, dict) and "data" in json_data:
-                result_data = json_data["data"]
-                if isinstance(result_data, dict) and "result" in result_data:
-                    return result_data["result"]
-            return None
-        else:
-            if fsinfo_resp.status_code != 200:
-                print(f"WARNING: Guest agent unavailable for VM {vmid}")
-            return None
+                cpus *= config.get("sockets", 1)
             
-    except Exception as e:
-        print(f"ERROR: Guest agent failed for VM {vmid}: {e}")
-        return None
+            result = {"ostype": ostype, "cpus": cpus}
+            _config_cache[cache_key] = (result, current_time)
+            return result
+    except Exception:
+        pass
+    
+    return {"ostype": "unknown", "cpus": 0}
 
-@lru_cache(maxsize=500)
-def get_cached_guest_disk_usage(node_name, vmid, guest_type, cache_time_slot):
-    """Cache disk usage for 1 minute to improve performance"""
+def get_guest_disk_usage_cached(node_name, vmid, guest_type):
+    """Cache expensive guest agent disk usage calls"""
     if guest_type != "qemu":
         return None
-        
+    
     cache_key = f"{node_name}:{vmid}:disk"
     current_time = time.time()
     
-    # Check in-memory cache first
-    if cache_key in disk_usage_cache:
-        cached_data, timestamp = disk_usage_cache[cache_key]
+    if cache_key in _disk_usage_cache:
+        data, timestamp = _disk_usage_cache[cache_key]
         if current_time - timestamp < DISK_USAGE_CACHE_TTL:
-            return cached_data
+            return data
     
-    # Get fresh disk usage data
-    disk_usage = get_guest_disk_usage(node_name, vmid, guest_type)
-    
-    # Cache the result
-    disk_usage_cache[cache_key] = (disk_usage, current_time)
-    return disk_usage
-
-
-def add_guest_metrics(metrics, lbl, st, disk_usage=None):
-    """Enhanced metrics generation with proper filesystem deduplication"""
-    # Pre-calculate values to avoid repeated dict lookups
-    status_val = 1 if st.get("status") == "running" else 0
-    cpu_ratio = st.get("cpu", 0)
-    uptime = st.get("uptime", 0)
-    mem = st.get("mem", 0)
-    maxmem = st.get("maxmem", 0)
-    disk = st.get("disk", 0)
-    maxdisk = st.get("maxdisk", 0)
-    netin = st.get("netin", 0)
-    netout = st.get("netout", 0)
-    diskread = st.get("diskread", 0)
-    diskwrite = st.get("diskwrite", 0)
-    swap = st.get("swap", 0)
-    maxswap = st.get("maxswap", 0)
-    cpus = st.get("cpus", 0)
-    
-    # Bulk append basic metrics
-    metrics.extend([
-        f'proxmox_guest_status{{{lbl}}} {status_val}',
-        f'proxmox_guest_cpus{{{lbl}}} {cpus}',
-        f'proxmox_guest_cpu_ratio{{{lbl}}} {cpu_ratio}',
-        f'proxmox_guest_uptime_seconds{{{lbl}}} {uptime}',
-        f'proxmox_guest_mem_bytes{{{lbl}}} {mem}',
-        f'proxmox_guest_maxmem_bytes{{{lbl}}} {maxmem}',
-        f'proxmox_guest_disk_bytes{{{lbl}}} {disk}',
-        f'proxmox_guest_maxdisk_bytes{{{lbl}}} {maxdisk}',
-        f'proxmox_guest_netin_bytes_total{{{lbl}}} {netin}',
-        f'proxmox_guest_netout_bytes_total{{{lbl}}} {netout}',
-        f'proxmox_guest_diskread_bytes_total{{{lbl}}} {diskread}',
-        f'proxmox_guest_diskwrite_bytes_total{{{lbl}}} {diskwrite}',
-        f'proxmox_guest_swap_bytes{{{lbl}}} {swap}',
-        f'proxmox_guest_maxswap_bytes{{{lbl}}} {maxswap}'
-    ])
-    
-    # Add internal disk metrics from guest agent with deduplication
-    if disk_usage:
-        # Use dictionary to deduplicate by mountpoint
-        unique_filesystems = {}
-        
-        for fs in disk_usage:
-            mountpoint = fs.get("mountpoint", "unknown")
-            
-            # Deduplicate by mountpoint - keep the first occurrence
-            if mountpoint not in unique_filesystems:
-                unique_filesystems[mountpoint] = fs
-            else:
-                continue
-        
-        # Process only unique filesystems
-        for mountpoint, fs in unique_filesystems.items():
-            total_bytes = fs.get("total-bytes", 0)
-            used_bytes = fs.get("used-bytes", 0)
-            
-            # Calculate available bytes
-            available_bytes = total_bytes - used_bytes if total_bytes > used_bytes else 0
-            
-            # FIXED: Proper label sanitization for Prometheus format
-            # Clean mountpoint for use in metric labels (escape special chars)
-            clean_mountpoint = (mountpoint
-                            .replace("\\", "\\\\")  # Escape backslashes first
-                            .replace('"', '\\"')    # Escape quotes
-                            .replace("\n", "\\n")   # Escape newlines
-                            .replace("\t", "\\t"))  # Escape tabs
-            
-            # Create filesystem identifier (no special chars for filesystem label)
-            filesystem_id = (mountpoint
-                            .replace("/", "_")
-                            .replace("\\", "_")
-                            .replace(":", "_")
-                            .replace(" ", "_")
-                            .replace('"', "_")
-                            .strip("_"))
-            if not filesystem_id:
-                filesystem_id = "root"
-            
-            # Create properly escaped labels
-            fs_lbl = f'{lbl},mountpoint="{clean_mountpoint}",filesystem="{filesystem_id}"'
-            
-            # Add filesystem metrics
-            metrics.extend([
-                f'proxmox_guest_vm_disk_total_bytes{{{fs_lbl}}} {total_bytes}',
-                f'proxmox_guest_vm_disk_used_bytes{{{fs_lbl}}} {used_bytes}',
-                f'proxmox_guest_vm_disk_available_bytes{{{fs_lbl}}} {available_bytes}'
-            ])
-            
-            # Add utilization metric
-            if total_bytes > 0:
-                utilization = used_bytes / total_bytes
-                metrics.append(f'proxmox_guest_vm_disk_utilization{{{fs_lbl}}} {utilization}')
-
-    
-    # Calculate utilization metrics only when needed
-    if maxmem > 0:
-        metrics.append(f'proxmox_guest_mem_utilisation{{{lbl}}} {mem / maxmem}')
-    if maxdisk > 0:
-        metrics.append(f'proxmox_guest_disk_utilisation{{{lbl}}} {disk / maxdisk}')
-    if maxswap > 0:
-        metrics.append(f'proxmox_guest_swap_utilisation{{{lbl}}} {swap / maxswap}')
-
-
-def get_all_guest_status(node_name):
-    """Get all guest status using optimized bulk + individual approach"""
     try:
-        guest_status = {}
-        
-        # Step 1: Get bulk resource data (efficient)
-        resources_resp = session.get(
-            f"https://{PROXMOX_HOST}:8006/api2/json/cluster/resources",
-            verify=VERIFY_SSL, timeout=15
+        resp = session.get(
+            f"https://{PROXMOX_HOST}:8006/api2/json/nodes/{node_name}/qemu/{vmid}/agent/get-fsinfo",
+            verify=VERIFY_SSL, timeout=5
         )
-        
-        if resources_resp.ok:
-            resources = resources_resp.json()["data"]
-            
-            # Filter for guests on this node
-            for resource in resources:
-                if (resource.get("type") in ["qemu", "lxc"] and 
-                    resource.get("node") == node_name):
-                    
-                    vmid = resource.get("vmid")
-                    if vmid:
-                        # Use bulk data as base
-                        guest_status[vmid] = {
-                            "vmid": vmid,
-                            "name": resource.get("name", f"{resource.get('type', 'vm')}{vmid}"),
-                            "type": resource.get("type"),
-                            "status": resource.get("status", "unknown"),
-                            "cpu": resource.get("cpu", 0),
-                            "mem": resource.get("mem", 0),
-                            "maxmem": resource.get("maxmem", 0),
-                            "disk": resource.get("disk", 0),
-                            "maxdisk": resource.get("maxdisk", 0),
-                            "uptime": resource.get("uptime", 0),
-                            "netin": resource.get("netin", 0),
-                            "netout": resource.get("netout", 0),
-                            "diskread": resource.get("diskread", 0),
-                            "diskwrite": resource.get("diskwrite", 0),
-                            "swap": resource.get("swap", 0),
-                            "maxswap": resource.get("maxswap", 0)
-                        }
-        
-        # Step 2: Get individual status for running guests missing critical data OR swap data
-        missing_data_count = 0
-        for vmid, guest_data in guest_status.items():
-            if guest_data.get("status") == "running":
-                # Check if we're missing critical runtime data
-                missing_critical_data = (
-                    guest_data.get("cpu", 0) == 0 and
-                    guest_data.get("mem", 0) == 0 and
-                    guest_data.get("uptime", 0) == 0
-                )
-                
-                # Check if swap data is missing (common for both QEMU and LXC)
-                missing_swap_data = (
-                    guest_data.get("swap", 0) == 0 and
-                    guest_data.get("maxswap", 0) == 0
-                )
-                
-                # Make individual call if missing critical data OR swap data
-                if missing_critical_data or missing_swap_data:
-                    missing_data_count += 1
-                    try:
-                        guest_type = guest_data["type"]
-                        status_resp = session.get(
-                            f"https://{PROXMOX_HOST}:8006/api2/json/nodes/{node_name}/{guest_type}/{vmid}/status/current",
-                            verify=VERIFY_SSL, timeout=3
-                        )
-                        
-                        if status_resp.ok:
-                            status_data = status_resp.json()["data"]
-                            # Update all fields including swap data
-                            guest_data.update({
-                                "cpu": status_data.get("cpu", guest_data.get("cpu", 0)),
-                                "uptime": status_data.get("uptime", guest_data.get("uptime", 0)),
-                                "mem": status_data.get("mem", guest_data.get("mem", 0)),
-                                "maxmem": status_data.get("maxmem", guest_data.get("maxmem", 0)),
-                                "swap": status_data.get("swap", guest_data.get("swap", 0)),
-                                "maxswap": status_data.get("maxswap", guest_data.get("maxswap", 0))
-                            })
-                            
-                    except Exception as e:
-                        print(f"Error getting detailed status for {guest_type} {vmid}: {e}")
-                        continue
+        if resp.ok:
+            json_data = resp.json()
+            if isinstance(json_data, dict) and "data" in json_data:
+                result_data = json_data["data"]
+                if isinstance(result_data, dict) and "result" in result_data:
+                    disk_usage = result_data["result"]
+                    _disk_usage_cache[cache_key] = (disk_usage, current_time)
+                    return disk_usage
+    except Exception:
+        pass
+    
+    _disk_usage_cache[cache_key] = (None, current_time)
+    return None
 
-        return guest_status
-        
-    except Exception as e:
-        print(f"Error getting guest status for {node_name}: {e}")
-        return {}
-
-def write_storage_metrics(buf):
-    """Add storage pool metrics for all nodes."""
+def get_storage_metrics_cached():
+    """Cache storage metrics (change slowly)"""
+    current_time = time.time()
+    
+    if "storage" in _storage_cache:
+        data, timestamp = _storage_cache["storage"]
+        if current_time - timestamp < STORAGE_CACHE_TTL:
+            return data
+    
+    metrics = []
     try:
-        # Get storage information
-        storage_resp = session.get(
+        resp = session.get(
             f"https://{PROXMOX_HOST}:8006/api2/json/cluster/resources",
-            verify=VERIFY_SSL, timeout=10
+            verify=VERIFY_SSL, timeout=5
         )
-        
-        if storage_resp.ok:
-            resources = storage_resp.json()["data"]
-            print(f"Got cluster resources for storage metrics")
-            
+        if resp.ok:
+            resources = resp.json()["data"]
             for resource in resources:
                 if resource.get("type") == "storage":
                     node = resource.get("node", "unknown")
                     storage_id = resource.get("storage", "unknown")
-                    
-                    # Storage metrics with labels
-                    labels = f'node="{node}",storage="{storage_id}"'
-                    
-                    # Total, used, and available space
                     total = resource.get("maxdisk", 0)
                     used = resource.get("disk", 0)
                     available = total - used if total > used else 0
-                    
-                    # Status (1 for available, 0 for unavailable)
                     status = 1 if resource.get("status") == "available" else 0
                     
-                    buf.append(f'proxmox_storage_total_bytes{{{labels}}} {total}')
-                    buf.append(f'proxmox_storage_used_bytes{{{labels}}} {used}')
-                    buf.append(f'proxmox_storage_available_bytes{{{labels}}} {available}')
-                    buf.append(f'proxmox_storage_status{{{labels}}} {status}')
-                    
-                    # Utilization percentage
-                    if total > 0:
-                        utilization = used / total
-                        buf.append(f'proxmox_storage_utilization{{{labels}}} {utilization}')
-        else:
-            print(f"Storage metrics API failed: {storage_resp.status_code}")
-            
-    except Exception as e:
-        print(f"Error getting storage metrics: {e}")
+                    labels = f'node="{node}",storage="{storage_id}"'
+                    metrics.extend([
+                        f'proxmox_storage_total_bytes{{{labels}}} {total}',
+                        f'proxmox_storage_used_bytes{{{labels}}} {used}',
+                        f'proxmox_storage_available_bytes{{{labels}}} {available}',
+                        f'proxmox_storage_status{{{labels}}} {status}'
+                    ])
+    except Exception:
+        pass
+    
+    _storage_cache["storage"] = (metrics, current_time)
+    return metrics
 
-def write_ceph_cluster_metrics(buf):
-    """Add cluster-wide Ceph metrics."""
+def get_ceph_metrics_cached():
+    """Cache Ceph metrics (change slowly)"""
+    current_time = time.time()
+    
+    if "ceph" in _ceph_cache:
+        data, timestamp = _ceph_cache["ceph"]
+        if current_time - timestamp < CEPH_CACHE_TTL:
+            return data
+    
+    metrics = []
     try:
-        # Cluster Ceph status
-        status_resp = session.get(
+        resp = session.get(
             f"https://{PROXMOX_HOST}:8006/api2/json/cluster/ceph/status",
-            verify=VERIFY_SSL, timeout=10
+            verify=VERIFY_SSL, timeout=5
         )
-        
-        if status_resp.ok:
-            status = status_resp.json().get("data", {})
-            print(f"Got Ceph cluster status: {list(status.keys())}")
+        if resp.ok:
+            status = resp.json().get("data", {})
             
             # Health status
             health = status.get("health", {})
             if "status" in health:
-                # Set value to 1 for the current active status
-                buf.append(f'proxmox_ceph_cluster_health{{status="{health["status"]}"}} 1')
+                metrics.append(f'proxmox_ceph_cluster_health{{status="{health["status"]}"}} 1')
             
             # PG map statistics
             pgmap = status.get("pgmap", {})
             if pgmap:
                 if "bytes_total" in pgmap:
-                    buf.append(f'proxmox_ceph_cluster_total_bytes{{cluster="ceph"}} {pgmap["bytes_total"]}')
+                    metrics.append(f'proxmox_ceph_cluster_total_bytes{{cluster="ceph"}} {pgmap["bytes_total"]}')
                 if "bytes_used" in pgmap:
-                    buf.append(f'proxmox_ceph_cluster_used_bytes{{cluster="ceph"}} {pgmap["bytes_used"]}')
+                    metrics.append(f'proxmox_ceph_cluster_used_bytes{{cluster="ceph"}} {pgmap["bytes_used"]}')
                 if "bytes_avail" in pgmap:
-                    buf.append(f'proxmox_ceph_cluster_available_bytes{{cluster="ceph"}} {pgmap["bytes_avail"]}')
+                    metrics.append(f'proxmox_ceph_cluster_available_bytes{{cluster="ceph"}} {pgmap["bytes_avail"]}')
                 if "num_pgs" in pgmap:
-                    buf.append(f'proxmox_ceph_cluster_pgs_total{{cluster="ceph"}} {pgmap["num_pgs"]}')
+                    metrics.append(f'proxmox_ceph_cluster_pgs_total{{cluster="ceph"}} {pgmap["num_pgs"]}')
             
-            # Monitor status
+            # Monitor and OSD status
             monmap = status.get("monmap", {})
             if "mons" in monmap:
-                buf.append(f'proxmox_ceph_monitors_total{{cluster="ceph"}} {len(monmap["mons"])}')
+                metrics.append(f'proxmox_ceph_monitors_total{{cluster="ceph"}} {len(monmap["mons"])}')
             
-            # OSD status
             osdmap = status.get("osdmap", {})
             if osdmap:
                 if "num_osds" in osdmap:
-                    buf.append(f'proxmox_ceph_osds_total{{cluster="ceph"}} {osdmap["num_osds"]}')
+                    metrics.append(f'proxmox_ceph_osds_total{{cluster="ceph"}} {osdmap["num_osds"]}')
                 if "num_up_osds" in osdmap:
-                    buf.append(f'proxmox_ceph_osds_up{{cluster="ceph"}} {osdmap["num_up_osds"]}')
+                    metrics.append(f'proxmox_ceph_osds_up{{cluster="ceph"}} {osdmap["num_up_osds"]}')
                 if "num_in_osds" in osdmap:
-                    buf.append(f'proxmox_ceph_osds_in{{cluster="ceph"}} {osdmap["num_in_osds"]}')
-        else:
-            print(f"Ceph cluster status API failed: {status_resp.status_code}")
+                    metrics.append(f'proxmox_ceph_osds_in{{cluster="ceph"}} {osdmap["num_in_osds"]}')
+    except Exception:
+        pass
+    
+    _ceph_cache["ceph"] = (metrics, current_time)
+    return metrics
+
+def get_realtime_guest_status(node_name):
+    """Get real-time guest status with consistent swap data"""
+    global _swap_rotation_index
+    
+    try:
+        resp = session.get(
+            f"https://{PROXMOX_HOST}:8006/api2/json/cluster/resources",
+            verify=VERIFY_SSL, timeout=8
+        )
+        if not resp.ok:
+            return {}
+        
+        resources = resp.json()["data"]
+        guest_status = {}
+        running_vms = []
+        
+        # Step 1: Get bulk data and identify running VMs
+        for resource in resources:
+            if (resource.get("type") in ["qemu", "lxc"] and 
+                resource.get("node") == node_name):
+                vmid = resource.get("vmid")
+                if vmid:
+                    guest_status[vmid] = {
+                        "vmid": vmid,
+                        "name": resource.get("name", f"vm{vmid}"),
+                        "type": resource.get("type"),
+                        "status": resource.get("status", "unknown"),
+                        "cpu": resource.get("cpu", 0),
+                        "mem": resource.get("mem", 0),
+                        "maxmem": resource.get("maxmem", 0),
+                        "disk": resource.get("disk", 0),
+                        "maxdisk": resource.get("maxdisk", 0),
+                        "uptime": resource.get("uptime", 0),
+                        "netin": resource.get("netin", 0),
+                        "netout": resource.get("netout", 0),
+                        "diskread": resource.get("diskread", 0),
+                        "diskwrite": resource.get("diskwrite", 0),
+                        "swap": resource.get("swap", 0),
+                        "maxswap": resource.get("maxswap", 0)
+                    }
+                    
+                    if resource.get("status") == "running":
+                        running_vms.append(vmid)
+        
+        # Step 2: Apply cached swap data first (always use if available)
+        current_time = time.time()
+        for vmid, data in guest_status.items():
+            if data.get("status") == "running":
+                cache_key = f"{node_name}:{vmid}:swap"
+                if cache_key in _swap_data_cache:
+                    cached_swap, timestamp = _swap_data_cache[cache_key]
+                    # Use cached data regardless of age to ensure consistency
+                    data.update(cached_swap)
+        
+        # Step 3: Smart rotation - only check 2 VMs per scrape for fresh data
+        if running_vms:
+            # Rotate through VMs, checking only 2 per scrape
+            vms_to_check = []
+            for i in range(2):  # Only 2 VMs per scrape
+                if running_vms:
+                    vm_index = (_swap_rotation_index + i) % len(running_vms)
+                    vms_to_check.append(running_vms[vm_index])
             
-    except Exception as e:
-        print(f"Error getting Ceph cluster metrics: {e}")
+            # Update rotation index for next scrape
+            _swap_rotation_index = (_swap_rotation_index + 2) % max(len(running_vms), 1)
+            
+            # Fetch fresh swap data for selected VMs only
+            for vmid in vms_to_check:
+                if vmid in guest_status:
+                    data = guest_status[vmid]
+                    
+                    # Always fetch fresh data for rotated VMs
+                    try:
+                        guest_type = data["type"]
+                        status_resp = session.get(
+                            f"https://{PROXMOX_HOST}:8006/api2/json/nodes/{node_name}/{guest_type}/{vmid}/status/current",
+                            verify=VERIFY_SSL, timeout=1
+                        )
+                        if status_resp.ok:
+                            status_data = status_resp.json()["data"]
+                            swap_data = {
+                                "swap": status_data.get("swap", 0),
+                                "maxswap": status_data.get("maxswap", 0)
+                            }
+                            # Update VM data and cache with extended TTL
+                            data.update(swap_data)
+                            cache_key = f"{node_name}:{vmid}:swap"
+                            _swap_data_cache[cache_key] = (swap_data, current_time)
+                    except Exception:
+                        continue
+        
+        return guest_status
+    except Exception:
+        return {}
 
 
-# Metrics endpoint
+
+def generate_guest_metrics(node_name, vmid, guest_data, config_data, disk_usage=None):
+    status_val = 1 if guest_data.get("status") == "running" else 0
+    name = guest_data.get("name", f"vm{vmid}")
+    ostype = config_data.get("ostype", "unknown")
+    cpus = config_data.get("cpus", 0)
+    
+    labels = f'node="{node_name}",vmid="{vmid}",name="{name}",ostype="{ostype}"'
+    
+    # Generate core metrics
+    metrics = [
+        f'proxmox_guest_status{{{labels}}} {status_val}',
+        f'proxmox_guest_cpus{{{labels}}} {cpus}',
+        f'proxmox_guest_cpu_ratio{{{labels}}} {guest_data.get("cpu", 0)}',
+        f'proxmox_guest_uptime_seconds{{{labels}}} {guest_data.get("uptime", 0)}',
+        f'proxmox_guest_mem_bytes{{{labels}}} {guest_data.get("mem", 0)}',
+        f'proxmox_guest_maxmem_bytes{{{labels}}} {guest_data.get("maxmem", 0)}',
+        f'proxmox_guest_disk_bytes{{{labels}}} {guest_data.get("disk", 0)}',
+        f'proxmox_guest_maxdisk_bytes{{{labels}}} {guest_data.get("maxdisk", 0)}',
+        f'proxmox_guest_netin_bytes_total{{{labels}}} {guest_data.get("netin", 0)}',
+        f'proxmox_guest_netout_bytes_total{{{labels}}} {guest_data.get("netout", 0)}',
+        f'proxmox_guest_diskread_bytes_total{{{labels}}} {guest_data.get("diskread", 0)}',
+        f'proxmox_guest_diskwrite_bytes_total{{{labels}}} {guest_data.get("diskwrite", 0)}',
+        f'proxmox_guest_swap_bytes{{{labels}}} {guest_data.get("swap", 0)}',
+        f'proxmox_guest_maxswap_bytes{{{labels}}} {guest_data.get("maxswap", 0)}'
+    ]
+    
+    # Add guest agent disk usage (if available)
+    if disk_usage:
+        unique_filesystems = {}
+        for fs in disk_usage:
+            mountpoint = fs.get("mountpoint", "unknown")
+            if mountpoint not in unique_filesystems:
+                unique_filesystems[mountpoint] = fs
+        
+        for mountpoint, fs in unique_filesystems.items():
+            total_bytes = fs.get("total-bytes", 0)
+            used_bytes = fs.get("used-bytes", 0)
+            available_bytes = total_bytes - used_bytes if total_bytes > used_bytes else 0
+            
+            clean_mountpoint = (mountpoint
+                              .replace("\\", "\\\\")
+                              .replace('"', '\\"')
+                              .replace("\n", "\\n")
+                              .replace("\t", "\\t"))
+            
+            filesystem_id = (mountpoint
+                           .replace("/", "_")
+                           .replace("\\", "_")
+                           .replace(":", "_")
+                           .replace(" ", "_")
+                           .replace('"', "_")
+                           .strip("_"))
+            
+            if not filesystem_id:
+                filesystem_id = "root"
+            
+            fs_lbl = f'{labels},mountpoint="{clean_mountpoint}",filesystem="{filesystem_id}"'
+            
+            metrics.extend([
+                f'proxmox_guest_vm_disk_total_bytes{{{fs_lbl}}} {total_bytes}',
+                f'proxmox_guest_vm_disk_used_bytes{{{fs_lbl}}} {used_bytes}',
+                f'proxmox_guest_vm_disk_available_bytes{{{fs_lbl}}} {available_bytes}'
+            ])
+    
+    return metrics
+
+
 @app.route("/pve")
 def pve_metrics():
+    """Optimized metrics endpoint with selective caching"""
     try:
-        if not proxmox_login():
-            return Response("# Proxmox API auth failed\n", mimetype="text/plain"), 500
-
-        # Get nodes once
-        nodes_resp = session.get(
-            f"https://{PROXMOX_HOST}:8006/api2/json/nodes",
-            verify=VERIFY_SSL, timeout=10
-        )
+        if not authenticate():
+            return Response("# Auth failed\n", mimetype="text/plain"), 500
         
-        if not nodes_resp.ok:
-            return Response("# Failed to get nodes\n", mimetype="text/plain"), 500
-            
-        nodes = nodes_resp.json()["data"]
         all_metrics = []
-        current_time_slot = int(time.time() / OS_TYPE_CACHE_TTL)
+        node_name = get_hostname()
         
-        # Get local node name
-        import socket
-        local_hostname = socket.gethostname()
+        # Get real-time guest status
+        guest_status = get_realtime_guest_status(node_name)
         
-        # Process only the local node
-        for node in nodes:
-            node_name = node["node"]
-            
-            # Skip non-local nodes
-            if node_name != local_hostname:
-                continue
+        # Process each VM
+        for vmid, guest_data in guest_status.items():
+            try:
+                guest_type = guest_data["type"]
                 
-            # Get all guest status for this node (already handles individual calls)
-            guest_status = get_all_guest_status(node_name)
-            
-            if not guest_status:
+                # Get cached config data
+                config_data = get_vm_config_cached(node_name, vmid, guest_type)
+                
+                # Get cached disk usage
+                disk_usage = None
+                if guest_type == "qemu" and guest_data.get("status") == "running":
+                    disk_usage = get_guest_disk_usage_cached(node_name, vmid, guest_type)
+                
+                # Generate metrics
+                guest_metrics = generate_guest_metrics(node_name, vmid, guest_data, config_data, disk_usage)
+                all_metrics.extend(guest_metrics)
+                
+            except Exception:
                 continue
-            
-            # Process all guests for this node and generate metrics
-            for vmid, guest_data in guest_status.items():
-                try:
-                    guest_type = guest_data["type"]
-                    name = guest_data["name"]
-                    
-                    # Get cached config data (OS type and CPU count)
-                    config_data = get_cached_vm_config(node_name, vmid, guest_type, current_time_slot)
-                    ostype = config_data["ostype"]
-                    
-                    # Override CPU count with cached value
-                    guest_data["cpus"] = config_data["cpus"]
-                    
-                    # Get internal disk usage for running QEMU VMs (cached)
-                    disk_usage = None
-                    if guest_type == "qemu" and guest_data.get("status") == "running":
-                        disk_cache_slot = int(time.time() / DISK_USAGE_CACHE_TTL)
-                        disk_usage = get_cached_guest_disk_usage(node_name, vmid, guest_type, disk_cache_slot)
-                    
-                    # Generate metrics
-                    guest_metrics = []
-                    add_guest_metrics(guest_metrics, format_labels(node_name, vmid, name, ostype), guest_data, disk_usage)
-                    all_metrics.extend(guest_metrics)
-                    
-                except Exception as e:
-                    print(f"Error processing guest {vmid}: {e}")
-                    continue
-
-            # Break after processing local node (no need to check other nodes)
-            break
-
-        # Add storage and Ceph metrics
-        buf = []
         
-        # Add storage metrics
-        write_storage_metrics(buf)
+        # Add cached storage metrics
+        all_metrics.extend(get_storage_metrics_cached())
         
-        # Add Ceph metrics (only if Ceph is available)
-        write_ceph_cluster_metrics(buf)
+        # Add cached Ceph metrics
+        all_metrics.extend(get_ceph_metrics_cached())
         
-        # Combine guest metrics with storage/ceph metrics
-        all_metrics.extend(buf)
-
         return Response("\n".join(all_metrics) + "\n", mimetype="text/plain")
-
+        
     except Exception as e:
-        print(f"Error in pve_metrics: {e}")
-        tb = traceback.format_exc()
-        return Response(f"# Internal error:\n{tb}", mimetype="text/plain"), 500
+        return Response(f"# Error: {str(e)}\n", mimetype="text/plain"), 500
 
-
-
-# Health check endpoint
 @app.route("/health")
 def health_check():
     return Response("OK\n", mimetype="text/plain")
