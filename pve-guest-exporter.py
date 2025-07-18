@@ -395,15 +395,54 @@ def get_realtime_guest_status(node_name):
     except Exception:
         return {}
 
-
+def get_host_resources_realtime(node_name):
+    """Get real-time host-level resource metrics - no caching"""
+    metrics = []
+    try:
+        resp = session.get(
+            f"https://{PROXMOX_HOST}:8006/api2/json/nodes/{node_name}/status",
+            verify=VERIFY_SSL, timeout=3  # Reduced timeout for faster response
+        )
+        if resp.ok:
+            status = resp.json()["data"]
+            labels = f'node="{node_name}"'
+            
+            # CPU metrics
+            if "cpu" in status:
+                metrics.append(f'proxmox_host_cpu_usage{{{labels}}} {status["cpu"]}')
+            if "cpuinfo" in status:
+                metrics.append(f'proxmox_host_cpu_total{{{labels}}} {status["cpuinfo"]["cpus"]}')
+            
+            # Memory metrics
+            if "memory" in status:
+                memory = status["memory"]
+                metrics.extend([
+                    f'proxmox_host_mem_used_bytes{{{labels}}} {memory["used"]}',
+                    f'proxmox_host_mem_total_bytes{{{labels}}} {memory["total"]}',
+                    f'proxmox_host_mem_free_bytes{{{labels}}} {memory["free"]}'
+                ])
+            
+            # Storage metrics
+            if "rootfs" in status:
+                rootfs = status["rootfs"]
+                metrics.extend([
+                    f'proxmox_host_storage_used_bytes{{{labels}}} {rootfs["used"]}',
+                    f'proxmox_host_storage_total_bytes{{{labels}}} {rootfs["total"]}',
+                    f'proxmox_host_storage_available_bytes{{{labels}}} {rootfs["avail"]}'
+                ])
+    except Exception:
+        pass
+    
+    return metrics
 
 def generate_guest_metrics(node_name, vmid, guest_data, config_data, disk_usage=None):
     status_val = 1 if guest_data.get("status") == "running" else 0
     name = guest_data.get("name", f"vm{vmid}")
     ostype = config_data.get("ostype", "unknown")
     cpus = config_data.get("cpus", 0)
+    guest_type = guest_data.get("type", "unknown")
     
-    labels = f'node="{node_name}",vmid="{vmid}",name="{name}",ostype="{ostype}"'
+    labels = f'node="{node_name}",vmid="{vmid}",name="{name}",ostype="{ostype}",type="{guest_type}"'
     
     # Generate core metrics
     metrics = [
@@ -503,10 +542,14 @@ def pve_metrics():
         # Add cached Ceph metrics
         all_metrics.extend(get_ceph_metrics_cached())
         
+        # Add REAL-TIME host metrics (no caching)
+        all_metrics.extend(get_host_resources_realtime(node_name))
+        
         return Response("\n".join(all_metrics) + "\n", mimetype="text/plain")
         
     except Exception as e:
         return Response(f"# Error: {str(e)}\n", mimetype="text/plain"), 500
+
 
 @app.route("/health")
 def health_check():
