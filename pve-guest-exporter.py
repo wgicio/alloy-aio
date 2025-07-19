@@ -318,7 +318,7 @@ def get_storage_metrics_cached():
 
 
 def get_ceph_metrics_cached():
-    """Cache comprehensive Ceph metrics with one-time error logging"""
+    """Cache only the essential Ceph metrics with one-time error logging"""
     current_time = time.time()
     
     if "ceph" in _ceph_cache:
@@ -328,11 +328,12 @@ def get_ceph_metrics_cached():
     
     metrics = []
     try:
-        # Get comprehensive Ceph status
+        # Get Ceph status
         resp = session.get(
             f"https://{PROXMOX_HOST}:8006/api2/json/cluster/ceph/status",
             verify=VERIFY_SSL, timeout=5
         )
+        
         if resp.ok:
             status = resp.json().get("data", {})
             
@@ -341,68 +342,48 @@ def get_ceph_metrics_cached():
             if "status" in health:
                 metrics.append(f'proxmox_ceph_cluster_health{{status="{health["status"]}"}} 1')
             
-            # PG map statistics with detailed PG states
+            # PG map statistics
             pgmap = status.get("pgmap", {})
             if pgmap:
-                # Basic storage metrics
+                # Performance metrics (IOPS and throughput)
+                if "read_op_per_sec" in pgmap:
+                    metrics.append(f'proxmox_ceph_cluster_read_iops{{cluster="ceph"}} {pgmap["read_op_per_sec"]}')
+                if "write_op_per_sec" in pgmap:
+                    metrics.append(f'proxmox_ceph_cluster_write_iops{{cluster="ceph"}} {pgmap["write_op_per_sec"]}')
+                if "read_bytes_sec" in pgmap:
+                    metrics.append(f'proxmox_ceph_cluster_read_bytes_sec{{cluster="ceph"}} {pgmap["read_bytes_sec"]}')
+                if "write_bytes_sec" in pgmap:
+                    metrics.append(f'proxmox_ceph_cluster_write_bytes_sec{{cluster="ceph"}} {pgmap["write_bytes_sec"]}')
+                
+                # Storage metrics
                 if "bytes_total" in pgmap:
                     metrics.append(f'proxmox_ceph_cluster_total_bytes{{cluster="ceph"}} {pgmap["bytes_total"]}')
                 if "bytes_used" in pgmap:
                     metrics.append(f'proxmox_ceph_cluster_used_bytes{{cluster="ceph"}} {pgmap["bytes_used"]}')
                 if "bytes_avail" in pgmap:
                     metrics.append(f'proxmox_ceph_cluster_available_bytes{{cluster="ceph"}} {pgmap["bytes_avail"]}')
+                
+                # PG metrics
                 if "num_pgs" in pgmap:
                     metrics.append(f'proxmox_ceph_cluster_pgs_total{{cluster="ceph"}} {pgmap["num_pgs"]}')
                 
-                # PG state breakdown
+                # PG state breakdown (only basic states)
                 pgs_by_state = pgmap.get("pgs_by_state", [])
                 for pg_state in pgs_by_state:
                     state_name = pg_state.get("state_name", "unknown")
                     count = pg_state.get("count", 0)
-                    
-                    # Create metrics for each PG state
                     metrics.append(f'proxmox_ceph_pgs_by_state{{cluster="ceph",state="{state_name}"}} {count}')
-                    
-                    # Specific metrics for important states
-                    if "scrubbing" in state_name:
-                        metrics.append(f'proxmox_ceph_pgs_scrubbing{{cluster="ceph"}} {count}')
-                    if "deep" in state_name and "scrubbing" in state_name:
-                        metrics.append(f'proxmox_ceph_pgs_deep_scrubbing{{cluster="ceph"}} {count}')
-                    if "degraded" in state_name:
-                        metrics.append(f'proxmox_ceph_pgs_degraded{{cluster="ceph"}} {count}')
-                    if "inconsistent" in state_name:
-                        metrics.append(f'proxmox_ceph_pgs_inconsistent{{cluster="ceph"}} {count}')
-                    if "recovering" in state_name:
-                        metrics.append(f'proxmox_ceph_pgs_recovering{{cluster="ceph"}} {count}')
-                
-                # Performance metrics
-                if "read_bytes_sec" in pgmap:
-                    metrics.append(f'proxmox_ceph_cluster_read_bytes_sec{{cluster="ceph"}} {pgmap["read_bytes_sec"]}')
-                if "write_bytes_sec" in pgmap:
-                    metrics.append(f'proxmox_ceph_cluster_write_bytes_sec{{cluster="ceph"}} {pgmap["write_bytes_sec"]}')
-                if "read_op_per_sec" in pgmap:
-                    metrics.append(f'proxmox_ceph_cluster_read_iops{{cluster="ceph"}} {pgmap["read_op_per_sec"]}')
-                if "write_op_per_sec" in pgmap:
-                    metrics.append(f'proxmox_ceph_cluster_write_iops{{cluster="ceph"}} {pgmap["write_op_per_sec"]}')
-                
-                # Recovery and scrubbing metrics
-                if "recovering_objects_per_sec" in pgmap:
-                    metrics.append(f'proxmox_ceph_cluster_recovering_objects_per_sec{{cluster="ceph"}} {pgmap["recovering_objects_per_sec"]}')
-                if "recovering_bytes_per_sec" in pgmap:
-                    metrics.append(f'proxmox_ceph_cluster_recovering_bytes_per_sec{{cluster="ceph"}} {pgmap["recovering_bytes_per_sec"]}')
-                if "recovering_keys_per_sec" in pgmap:
-                    metrics.append(f'proxmox_ceph_cluster_recovering_keys_per_sec{{cluster="ceph"}} {pgmap["recovering_keys_per_sec"]}')
             
             # Monitor status
             monmap = status.get("monmap", {})
             if "mons" in monmap:
                 metrics.append(f'proxmox_ceph_monitors_total{{cluster="ceph"}} {len(monmap["mons"])}')
-                
-                # Monitor quorum status
-                quorum = status.get("quorum", [])
-                metrics.append(f'proxmox_ceph_monitors_in_quorum{{cluster="ceph"}} {len(quorum)}')
             
-            # OSD status with detailed breakdown
+            # Monitor quorum status
+            quorum = status.get("quorum", [])
+            metrics.append(f'proxmox_ceph_monitors_in_quorum{{cluster="ceph"}} {len(quorum)}')
+            
+            # OSD status (summary only)
             osdmap = status.get("osdmap", {})
             if osdmap:
                 if "num_osds" in osdmap:
@@ -417,52 +398,12 @@ def get_ceph_metrics_cached():
                 num_out = osdmap.get("num_osds", 0) - osdmap.get("num_in_osds", 0)
                 metrics.append(f'proxmox_ceph_osds_down{{cluster="ceph"}} {num_down}')
                 metrics.append(f'proxmox_ceph_osds_out{{cluster="ceph"}} {num_out}')
-                
-                # OSD full ratios
-                if "full_ratio" in osdmap:
-                    metrics.append(f'proxmox_ceph_osd_full_ratio{{cluster="ceph"}} {osdmap["full_ratio"]}')
-                if "backfillfull_ratio" in osdmap:
-                    metrics.append(f'proxmox_ceph_osd_backfillfull_ratio{{cluster="ceph"}} {osdmap["backfillfull_ratio"]}')
-                if "nearfull_ratio" in osdmap:
-                    metrics.append(f'proxmox_ceph_osd_nearfull_ratio{{cluster="ceph"}} {osdmap["nearfull_ratio"]}')
             
             # Clear error log on success
             clear_error_log("ceph_api_error")
         else:
             error_key = "ceph_api_error"
             log_error_once(error_key, f"Ceph metrics API failed: {resp.status_code}")
-        
-        # Get additional OSD performance metrics
-        try:
-            osd_resp = session.get(
-                f"https://{PROXMOX_HOST}:8006/api2/json/cluster/ceph/osd",
-                verify=VERIFY_SSL, timeout=5
-            )
-            if osd_resp.ok:
-                osds = osd_resp.json().get("data", [])
-                for osd in osds:
-                    osd_id = osd.get("id", "unknown")
-                    osd_name = osd.get("name", f"osd.{osd_id}")
-                    
-                    # OSD status metrics
-                    status_val = 1 if osd.get("status") == "up" else 0
-                    in_val = 1 if osd.get("in") == 1 else 0
-                    
-                    metrics.extend([
-                        f'proxmox_ceph_osd_status{{cluster="ceph",osd="{osd_name}",osd_id="{osd_id}"}} {status_val}',
-                        f'proxmox_ceph_osd_in{{cluster="ceph",osd="{osd_name}",osd_id="{osd_id}"}} {in_val}'
-                    ])
-                    
-                    # OSD utilization metrics
-                    if "utilization" in osd:
-                        metrics.append(f'proxmox_ceph_osd_utilization{{cluster="ceph",osd="{osd_name}",osd_id="{osd_id}"}} {osd["utilization"]}')
-                    if "variance" in osd:
-                        metrics.append(f'proxmox_ceph_osd_variance{{cluster="ceph",osd="{osd_name}",osd_id="{osd_id}"}} {osd["variance"]}')
-                    if "pgs" in osd:
-                        metrics.append(f'proxmox_ceph_osd_pgs{{cluster="ceph",osd="{osd_name}",osd_id="{osd_id}"}} {osd["pgs"]}')
-        except Exception as e:
-            error_key = "ceph_osd_api_error"
-            log_error_once(error_key, f"Ceph OSD metrics API failed: {e}")
             
     except Exception as e:
         error_key = "ceph_api_error"
@@ -470,6 +411,7 @@ def get_ceph_metrics_cached():
     
     _ceph_cache["ceph"] = (metrics, current_time)
     return metrics
+
 
 
 def get_realtime_guest_status(node_name):
