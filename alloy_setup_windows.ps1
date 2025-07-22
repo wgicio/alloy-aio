@@ -181,9 +181,9 @@ function Install-Alloy {
     # Run silent installation
     Write-LogMessage "Running silent installation..."
     try {
-        $installArgs = "/S /CONFIG=`"$ConfigFile`""
+        $installArgs = "/S /CONFIG=`"$ConfigFile`" /DISABLEREPORTING=yes"
         Start-Process -FilePath $installerPath -ArgumentList $installArgs -Wait -NoNewWindow
-        Write-LogMessage "Alloy installed successfully" "SUCCESS"
+        Write-LogMessage "Alloy installed successfully with reporting disabled" "SUCCESS"
     }
     catch {
         Write-LogMessage "Failed to install Alloy: $($_.Exception.Message)" "ERROR"
@@ -239,10 +239,11 @@ function Deploy-Configuration {
         } else {
             # If not set, set to default using appropriate config file
             $configFileName = if ($IsVM) { 'aio-windows-logs.alloy' } else { 'aio-windows.alloy' }
-            $defaultArgs = "run`r`nC:\Program Files\GrafanaLabs\Alloy\$configFileName`r`n--storage.path=C:\ProgramData\GrafanaLabs\Alloy\data`r `n--disable-reporting"
+            $defaultArgs = "run`r`nC:\Program Files\GrafanaLabs\Alloy\$configFileName`r`n--storage.path=C:\ProgramData\GrafanaLabs\Alloy\data"
             Set-ItemProperty -Path $regPath -Name Arguments -Value $defaultArgs -Force
             Write-LogMessage "Registry Arguments created: $defaultArgs" "SUCCESS"
         }
+
     } catch {
         Write-LogMessage "Failed to set registry Arguments: $($_.Exception.Message)" "ERROR"
     }
