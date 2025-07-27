@@ -959,26 +959,54 @@ setup_proxmox_exporter_service() {
     # Create dedicated directory for pve-guest-exporter
     mkdir -p /etc/alloy/pve-guest-exporter
 
-    local exporter_py_src="$(dirname "$0")/pve-guest-exporter.py"
+    # Handle case when script is executed via curl (dirname "$0" would fail)
+    local exporter_py_src=""
+    local service_file_src=""
+    if [[ -f "$0" ]]; then
+        exporter_py_src="$(dirname "$0")/pve-guest-exporter.py"
+        service_file_src="$(dirname "$0")/pve-guest-exporter.service"
+    else
+        # Fallback URLs for when script is executed via curl
+        exporter_py_src="https://raw.githubusercontent.com/IT-BAER/alloy-aio/main/pve-guest-exporter.py"
+        service_file_src="https://raw.githubusercontent.com/IT-BAER/alloy-aio/main/pve-guest-exporter.service"
+    fi
+    
     local exporter_py_dst="/etc/alloy/pve-guest-exporter/pve-guest-exporter.py"
-    local service_file_src="$(dirname "$0")/pve-guest-exporter.service"
     local service_file_dst="/etc/systemd/system/pve-guest-exporter.service"
 
-    # Use local files (require git clone)
+    # Use local files (require git clone) or download from URL
     log "Copying exporter script from local repository..."
-    if run_with_spinner "cp \"$exporter_py_src\" \"$exporter_py_dst\"" "Copying exporter script..."; then
-        log_success "Exporter script installed to $exporter_py_dst"
+    if [[ -f "$exporter_py_src" ]]; then
+        if run_with_spinner "cp \"$exporter_py_src\" \"$exporter_py_dst\"" "Copying exporter script..."; then
+            log_success "Exporter script installed to $exporter_py_dst"
+        else
+            error_exit "Failed to copy exporter script from local repository"
+        fi
     else
-        error_exit "Failed to copy exporter script from local repository"
+        # Download from URL
+        if run_with_spinner "wget -q -O \"$exporter_py_dst\" \"$exporter_py_src\"" "Downloading exporter script..."; then
+            log_success "Exporter script downloaded to $exporter_py_dst"
+        else
+            error_exit "Failed to download exporter script from $exporter_py_src"
+        fi
     fi
     chown root:alloy "$exporter_py_dst"
     chmod 750 "$exporter_py_dst"
 
     log "Copying systemd unit from local repository..."
-    if run_with_spinner "cp \"$service_file_src\" \"$service_file_dst\"" "Copying systemd unit..."; then
-        log_success "Systemd unit installed to $service_file_dst"
+    if [[ -f "$service_file_src" ]]; then
+        if run_with_spinner "cp \"$service_file_src\" \"$service_file_dst\"" "Copying systemd unit..."; then
+            log_success "Systemd unit installed to $service_file_dst"
+        else
+            error_exit "Failed to copy systemd unit from local repository"
+        fi
     else
-        error_exit "Failed to copy systemd unit from local repository"
+        # Download from URL
+        if run_with_spinner "wget -q -O \"$service_file_dst\" \"$service_file_src\"" "Downloading systemd unit..."; then
+            log_success "Systemd unit downloaded to $service_file_dst"
+        else
+            error_exit "Failed to download systemd unit from $service_file_src"
+        fi
     fi
     chown root:root "$service_file_dst"
     chmod 644 "$service_file_dst"
