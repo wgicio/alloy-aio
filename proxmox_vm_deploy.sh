@@ -1,6 +1,6 @@
 #!/bin/bash
 # =============================================================================
-# Simplified Proxmox VM Deployment Script for Grafana Alloy
+# Proxmox VM Deployment Script for Grafana Alloy
 # =============================================================================
 
 set -euo pipefail  # Exit on error, undefined vars, pipe failures
@@ -29,7 +29,7 @@ log_warning() {
 # Show usage information
 show_usage() {
     echo "============================================="
-    echo "    Simplified Proxmox VM Deployment"
+    echo "           Proxmox VM Deployment"
     echo "============================================="
     echo
     echo "This script simplifies the deployment of Grafana Alloy to all running Proxmox VMs."
@@ -132,15 +132,40 @@ deploy_to_vm() {
     fi
 }
 
+# Spinner for long-running commands
+show_spinner() {
+    local msg="$1"
+    local pid=$2
+    local spinner=("|" "/" "-" "\\")
+    local delay=0.1
+    local i=0
+    
+    tput civis 2>/dev/null || true
+    while kill -0 $pid 2>/dev/null; do
+        printf "\r${BLUE}[INFO]${NC} $msg %s" "${spinner[$i]}"
+        i=$(( (i+1) % 4 ))
+        sleep $delay
+    done
+    tput cnorm 2>/dev/null || true
+}
+
 # Deploy to a Windows VM
 deploy_to_windows_vm() {
     local vmid=$1
     
     local deploy_cmd="Set-ExecutionPolicy Bypass -Scope Process -Force; \$ProgressPreference = 'SilentlyContinue'; [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; Remove-Item -Path 'C:\WINDOWS\TEMP\alloy-install' -Recurse -Force -ErrorAction SilentlyContinue; Remove-Item -Path 'C:\alloy_setup.ps1' -Force -ErrorAction SilentlyContinue; Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/IT-BAER/alloy-aio/main/alloy_setup_windows.ps1' -OutFile 'C:\alloy_setup.ps1'; & 'C:\alloy_setup.ps1' -LokiUrl '$LOKI_URL' -NonInteractive; Remove-Item -Path 'C:\alloy_setup.ps1' -Force -ErrorAction SilentlyContinue;"
     
-    if qm guest exec $vmid --timeout 60 powershell.exe "$deploy_cmd"; then
+    # Run the command in background and show spinner
+    qm guest exec $vmid --timeout 120 powershell.exe "$deploy_cmd" >/dev/null 2>&1 &
+    local pid=$!
+    
+    show_spinner "Installing Alloy on Windows VM $vmid..." $pid
+    
+    if wait $pid; then
+        printf "\r${BLUE}[INFO]${NC} Installing Alloy on Windows VM $vmid...    \n"
         log_success "Completed setup for Windows VM $vmid"
     else
+        printf "\r${BLUE}[INFO]${NC} Installing Alloy on Windows VM $vmid...    \n"
         log_error "Failed to setup Alloy in Windows VM $vmid"
         return 1
     fi
@@ -152,9 +177,17 @@ deploy_to_linux_vm() {
     
     local deploy_cmd="cd /tmp && rm -f alloy_setup.sh && wget -q https://raw.githubusercontent.com/IT-BAER/alloy-aio/main/alloy_setup.sh && chmod +x alloy_setup.sh && DEBIAN_FRONTEND=noninteractive sudo bash alloy_setup.sh --loki-url '$LOKI_URL' --non-interactive && rm -f alloy_setup.sh"
     
-    if qm guest exec $vmid --timeout 60 -- bash -c "$deploy_cmd"; then
+    # Run the command in background and show spinner
+    qm guest exec $vmid --timeout 120 -- bash -c "$deploy_cmd" >/dev/null 2>&1 &
+    local pid=$!
+    
+    show_spinner "Installing Alloy on Linux VM $vmid..." $pid
+    
+    if wait $pid; then
+        printf "\r${BLUE}[INFO]${NC} Installing Alloy on Linux VM $vmid...    \n"
         log_success "Completed setup for Linux VM $vmid"
     else
+        printf "\r${BLUE}[INFO]${NC} Installing Alloy on Linux VM $vmid...    \n"
         log_error "Failed to setup Alloy in Linux VM $vmid"
         return 1
     fi
@@ -165,7 +198,7 @@ main() {
     parse_args "$@"
     
     echo "============================================="
-    echo "    Simplified Proxmox VM Deployment"
+    echo "           Proxmox VM Deployment"
     echo "============================================="
     echo
     
