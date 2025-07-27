@@ -23,6 +23,7 @@
   <a href="#-security">🔒 Security</a> •
   <a href="#-learn-more">📚 More</a> •
   <a href="#-license">📄 License</a> •
+  <a href="#-support-development">💜 Support</a> •
   <a href="#-credits">👏 Credits</a>
 </p>
 
