@@ -495,13 +495,26 @@ deploy_configuration() {
     ALLOY_CONFIG_FILE="$ALLOY_CONFIG_PATH/$config_filename"
 
     log "Copying configuration from: $config_path"
-    if run_with_spinner "cp \"$config_path\" \"$ALLOY_CONFIG_FILE\"" "Copying configuration file..."; then
-        log_success "Configuration copied successfully as $ALLOY_CONFIG_FILE"
-        config_deployed=true
+    # Check if config_path is a URL or local file
+    if [[ "$config_path" == https://* ]] || [[ "$config_path" == http://* ]]; then
+        # Download from URL
+        if run_with_spinner "wget -q -O \"$ALLOY_CONFIG_FILE\" \"$config_path\"" "Downloading configuration file..."; then
+            log_success "Configuration downloaded successfully as $ALLOY_CONFIG_FILE"
+            config_deployed=true
+        else
+            log_error "Failed to download configuration from $config_path"
+            error_exit "Configuration deployment failed - download failed"
+        fi
     else
-        log_error "Failed to copy configuration from local repository"
-        log_error "Please check that you have cloned the repository and all files are present"
-        error_exit "Configuration deployment failed - file missing"
+        # Copy local file
+        if run_with_spinner "cp \"$config_path\" \"$ALLOY_CONFIG_FILE\"" "Copying configuration file..."; then
+            log_success "Configuration copied successfully as $ALLOY_CONFIG_FILE"
+            config_deployed=true
+        else
+            log_error "Failed to copy configuration from local repository"
+            log_error "Please check that you have cloned the repository and all files are present"
+            error_exit "Configuration deployment failed - file missing"
+        fi
     fi
     
     if [[ "$config_deployed" == true ]]; then
