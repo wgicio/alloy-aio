@@ -26,6 +26,8 @@
   <a href="#-credits">👏 Credits</a>
 </p>
 
+<br>
+
 ## ✨ Key Features
 
 > **Automatic Detection:** Installer automatically detects system type (Standalone, Proxmox Host, VM/Container) and configures Logs + Metrics or Logs-Only mode accordingly.
