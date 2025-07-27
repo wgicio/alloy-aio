@@ -1,6 +1,6 @@
 #!/bin/bash
 # =============================================================================
-# Simplified Proxmox Container Deployment Script for Grafana Alloy
+# Proxmox Container Deployment Script for Grafana Alloy
 # =============================================================================
 
 set -euo pipefail  # Exit on error, undefined vars, pipe failures
@@ -29,7 +29,7 @@ log_warning() {
 # Show usage information
 show_usage() {
     echo "============================================="
-    echo "    Simplified Proxmox Container Deployment"
+    echo "        Proxmox Container Deployment"
     echo "============================================="
     echo
     echo "This script simplifies the deployment of Grafana Alloy to all running Proxmox containers."
@@ -154,7 +154,7 @@ main() {
     parse_args "$@"
     
     echo "============================================="
-    echo "    Simplified Proxmox Container Deployment"
+    echo "        Proxmox Container Deployment"
     echo "============================================="
     echo
     
