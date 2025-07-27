@@ -118,6 +118,59 @@ run_with_spinner() {
     return $status
 }
 
+# Function to automatically add spinner for operations that might take longer than 500ms
+auto_spinner() {
+    local msg="$1"
+    local cmd="$2"
+    
+    # For simple log messages, just output them directly
+    if [[ -z "$cmd" ]]; then
+        log "$msg"
+        return 0
+    fi
+    
+    # For commands, check if they're likely to take a long time
+    case "$cmd" in
+        # These commands are likely to be fast
+        "mkdir"*)
+            if [[ "$msg" == *"Creating"* ]] || [[ "$msg" == *"Creating system user"* ]]; then
+                # User creation might take time
+                run_with_spinner "$cmd" "$msg"
+            else
+                # Simple mkdir operations are fast
+                log "$msg"
+                eval "$cmd" || return $?
+                log_success "${msg%...}"
+            fi
+            ;;
+        "echo"*)
+            # Echo commands are fast
+            log "$msg"
+            eval "$cmd" || return $?
+            ;;
+        "cat"*)
+            # Cat commands are usually fast
+            log "$msg"
+            eval "$cmd" || return $?
+            ;;
+        "grep"*)
+            # Grep commands are usually fast
+            log "$msg"
+            eval "$cmd" || return $?
+            ;;
+        "chmod"*|"chown"*)
+            # Permission commands are usually fast
+            log "$msg"
+            eval "$cmd" || return $?
+            log_success "${msg%...}"
+            ;;
+        *)
+            # For other commands, use the spinner
+            run_with_spinner "$cmd" "$msg"
+            ;;
+    esac
+}
+
 # Error handler
 error_exit() {
     log_error "$1"
@@ -257,7 +310,24 @@ detect_proxmox() {
 
 # Update package lists
 update_packages() {
-    :
+    # Only run update if it hasn't been run recently (in the last hour)
+    local apt_lists="/var/lib/apt/lists"
+    if [[ -d "$apt_lists" ]]; then
+        local last_update=$(stat -c %Y "$apt_lists" 2>/dev/null || echo 0)
+        local current_time=$(date +%s)
+        local time_diff=$((current_time - last_update))
+        
+        # If lists are older than 1 hour (3600 seconds), update them
+        if [[ $time_diff -gt 3600 ]]; then
+            run_with_spinner "DEBIAN_FRONTEND=noninteractive apt-get update -qq > /dev/null 2>&1" "Updating package lists..." || error_exit "Failed to update package lists"
+            log_success "Package lists updated"
+        else
+            log "Package lists are recent, skipping update"
+        fi
+    else
+        run_with_spinner "DEBIAN_FRONTEND=noninteractive apt-get update -qq > /dev/null 2>&1" "Updating package lists..." || error_exit "Failed to update package lists"
+        log_success "Package lists updated"
+    fi
 }
 
 
@@ -360,16 +430,16 @@ setup_permissions() {
 		log "Configuring ACL permissions for log files (current and future)..."
 		
 		# Grant read+execute access to /var/log directory for traversal
-		setfacl -m u:alloy:rx /var/log/
+		run_with_spinner "setfacl -m u:alloy:rx /var/log/ > /dev/null 2>&1" "Setting ACL permissions for /var/log..." || error_exit "Failed to set ACL permissions for /var/log"
 		
 		# Grant read+execute access to all existing files and directories recursively
 		# (directories need 'x' for traversal, files will ignore 'x' for reading)
-		setfacl -R -m u:alloy:rx /var/log/
+		run_with_spinner "setfacl -R -m u:alloy:rx /var/log/ > /dev/null 2>&1" "Setting recursive ACL permissions for /var/log..." || error_exit "Failed to set recursive ACL permissions for /var/log"
 		
 		# Set default ACL on /var/log and all subdirectories so new files/directories 
 		# automatically inherit alloy:rx permissions
-		setfacl -d -m u:alloy:rx /var/log/
-		setfacl -R -d -m u:alloy:rx /var/log/
+		run_with_spinner "setfacl -d -m u:alloy:rx /var/log/ > /dev/null 2>&1" "Setting default ACL permissions for /var/log..." || error_exit "Failed to set default ACL permissions for /var/log"
+		run_with_spinner "setfacl -R -d -m u:alloy:rx /var/log/ > /dev/null 2>&1" "Setting recursive default ACL permissions for /var/log..." || error_exit "Failed to set recursive default ACL permissions for /var/log"
 		
 		log_success "ACL permissions configured for current and future log files"
 		
@@ -418,7 +488,7 @@ deploy_configuration() {
     ALLOY_CONFIG_FILE="$ALLOY_CONFIG_PATH/$config_filename"
 
     log "Copying configuration from: $config_path"
-    if cp "$config_path" "$ALLOY_CONFIG_FILE"; then
+    if run_with_spinner "cp \"$config_path\" \"$ALLOY_CONFIG_FILE\"" "Copying configuration file..."; then
         log_success "Configuration copied successfully as $ALLOY_CONFIG_FILE"
         config_deployed=true
     else
@@ -792,10 +862,10 @@ setup_proxmox_exporter_user_and_token() {
 
     # Create custom AlloyMonitor role if it doesn't exist
     log "Creating custom AlloyMonitor role..."
-    role_output=$(pveum role add AlloyMonitor -privs "VM.Audit,VM.Monitor,Datastore.Audit,Sys.Audit,Pool.Audit" 2>&1) || true
+    role_output=$(run_with_spinner "pveum role add AlloyMonitor -privs \"VM.Audit,VM.Monitor,Datastore.Audit,Sys.Audit,Pool.Audit\" 2>&1" "Creating AlloyMonitor role..." || echo "ERROR") || true
     if echo "$role_output" | grep -qi 'already exists'; then
         log_success "AlloyMonitor role already exists"
-    elif [[ -n "$role_output" ]]; then
+    elif echo "$role_output" | grep -qi 'ERROR'; then
         log_error "Failed to create AlloyMonitor role: $role_output"
         PROXMOX_OVERRIDE_GRANTED="0"
         return 1
@@ -804,10 +874,10 @@ setup_proxmox_exporter_user_and_token() {
     fi
 
     # Try to create user first, but do NOT prompt or override if it exists
-    user_add_output=$(pveum user add "$pve_user" --comment "Grafana Alloy Exporter" --enable 1 2>&1) || true
+    user_add_output=$(run_with_spinner "pveum user add \"$pve_user\" --comment \"Grafana Alloy Exporter\" --enable 1 2>&1" "Creating Proxmox user $pve_user..." || echo "ERROR") || true
     if echo "$user_add_output" | grep -qi 'already exists'; then
         log_success "Proxmox user $pve_user already exists. Continuing without override."
-    elif [[ -n "$user_add_output" ]]; then
+    elif echo "$user_add_output" | grep -qi 'ERROR'; then
         log_error "Failed to create Proxmox user $pve_user: $user_add_output"
         PROXMOX_OVERRIDE_GRANTED="0"
         return 1
@@ -820,10 +890,10 @@ setup_proxmox_exporter_user_and_token() {
 
     # Assign AlloyMonitor role to alloy@pve on root (cluster-wide read access)
     log "Assigning AlloyMonitor role to $pve_user on / ..."
-    acl_output=$(pveum acl modify / -user "$pve_user" -role AlloyMonitor 2>&1) || true
+    acl_output=$(run_with_spinner "pveum acl modify / -user \"$pve_user\" -role AlloyMonitor 2>&1" "Assigning AlloyMonitor role to $pve_user..." || echo "ERROR") || true
     if echo "$acl_output" | grep -qi 'already exists'; then
         log_success "AlloyMonitor role already assigned to $pve_user."
-    elif [[ -n "$acl_output" ]]; then
+    elif echo "$acl_output" | grep -qi 'ERROR'; then
         log_error "Failed to assign AlloyMonitor role: $acl_output"
     else
         log_success "AlloyMonitor role assigned to $pve_user."
@@ -832,11 +902,11 @@ setup_proxmox_exporter_user_and_token() {
     # Force delete existing token if it exists (overwrite behavior)
     if pveum user token list "$pve_user" | grep '^│' | grep -v 'tokenid' | awk '{print $2}' | grep -Fxq "$token_id"; then
         log "Deleting existing API token $pve_user!$token_id to create fresh token..."
-        pveum user token delete "$pve_user" "$token_id" 2>/dev/null || true
+        run_with_spinner "pveum user token delete \"$pve_user\" \"$token_id\" 2>/dev/null" "Deleting existing API token..." || true
         log_success "Existing token deleted"
     fi
 
-    token_output=$(pveum user token add "$pve_user" "$token_id" --privsep 0 2>&1)
+    token_output=$(run_with_spinner "pveum user token add \"$pve_user\" \"$token_id\" --privsep 0 2>&1" "Creating API token for $pve_user..." || echo "ERROR")
     # Try to extract the token value from the Proxmox table output
     token_value=""
     value_line=$(echo "$token_output" | grep -E '^│[[:space:]]*value[[:space:]]*│')
@@ -889,7 +959,7 @@ setup_proxmox_exporter_service() {
 
     # Use local files (require git clone)
     log "Copying exporter script from local repository..."
-    if cp "$exporter_py_src" "$exporter_py_dst"; then
+    if run_with_spinner "cp \"$exporter_py_src\" \"$exporter_py_dst\"" "Copying exporter script..."; then
         log_success "Exporter script installed to $exporter_py_dst"
     else
         error_exit "Failed to copy exporter script from local repository"
@@ -898,7 +968,7 @@ setup_proxmox_exporter_service() {
     chmod 750 "$exporter_py_dst"
 
     log "Copying systemd unit from local repository..."
-    if cp "$service_file_src" "$service_file_dst"; then
+    if run_with_spinner "cp \"$service_file_src\" \"$service_file_dst\"" "Copying systemd unit..."; then
         log_success "Systemd unit installed to $service_file_dst"
     else
         error_exit "Failed to copy systemd unit from local repository"
@@ -907,7 +977,8 @@ setup_proxmox_exporter_service() {
     chmod 644 "$service_file_dst"
 
     # Reload systemd to pick up new unit
-    systemctl daemon-reload
+    run_with_spinner "systemctl daemon-reload" "Reloading systemd daemon..." || error_exit "Failed to reload systemd daemon"
+    log_success "Systemd daemon reloaded"
 }
 
 

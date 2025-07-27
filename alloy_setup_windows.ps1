@@ -141,6 +141,41 @@ function Clear-TempFiles {
 # Set up cleanup on script exit (including Ctrl+C)
 $null = Register-EngineEvent PowerShell.Exiting -Action { Clear-TempFiles }
 
+function Show-Spinner {
+    param([string]$Message, [scriptblock]$ScriptBlock, [object[]]$ArgumentList)
+    
+    # Display the initial message with [INFO] tag and color on the same line
+    $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    Write-Host -NoNewline "[INFO] $Message " -ForegroundColor Cyan
+    
+    $spinner = @('|', '/', '-', '\')
+    $i = 0
+    
+    # Start the job with arguments if provided
+    if ($ArgumentList) {
+        $job = Start-Job -ScriptBlock $ScriptBlock -ArgumentList $ArgumentList
+    } else {
+        $job = Start-Job -ScriptBlock $ScriptBlock
+    }
+    
+    # Show spinner while job is running
+    while ($job.State -eq "Running") {
+        Write-Host -NoNewline "$($spinner[$i % $spinner.Count])"
+        $i++
+        Start-Sleep -Milliseconds 100
+        Write-Host -NoNewline "`b"
+    }
+    
+    # Complete the line
+    Write-Host " "
+    
+    # Get the result
+    $result = Receive-Job -Job $job
+    Remove-Job -Job $job
+    
+    return $result
+}
+
 function Install-Alloy {
     Write-LogMessage "Installing Grafana Alloy on Windows..."
     
@@ -150,9 +185,11 @@ function Install-Alloy {
     
     # Download installer
     $zipFile = "$TempDir\alloy-installer.zip"
-    Write-LogMessage "Downloading latest Alloy installer..."
     try {
-        Invoke-WebRequest -Uri $InstallerUrl -OutFile $zipFile
+        Show-Spinner "Downloading latest Alloy installer..." {
+            param($InstallerUrl, $zipFile)
+            Invoke-WebRequest -Uri $InstallerUrl -OutFile $zipFile
+        } -ArgumentList $InstallerUrl, $zipFile
         Write-LogMessage "Installer downloaded successfully" "SUCCESS"
     }
     catch {
@@ -162,14 +199,21 @@ function Install-Alloy {
     }
     
     # Extract installer
-    Write-LogMessage "Extracting installer..."
     try {
-        Expand-Archive -Path $zipFile -DestinationPath $TempDir -Force
-        $installerExe = Get-ChildItem -Path $TempDir -Name "alloy-installer-windows-amd64.exe" -Recurse | Select-Object -First 1
-        if (-not $installerExe) {
-            throw "Installer executable not found after extraction"
-        }
-        $installerPath = "$TempDir\$installerExe"
+        $extractResult = Show-Spinner "Extracting installer..." {
+            param($zipFile, $TempDir)
+            Expand-Archive -Path $zipFile -DestinationPath $TempDir -Force
+            $installerExe = Get-ChildItem -Path $TempDir -Name "alloy-installer-windows-amd64.exe" -Recurse | Select-Object -First 1
+            if (-not $installerExe) {
+                throw "Installer executable not found after extraction"
+            }
+            $installerPath = "$TempDir\$installerExe"
+            return $installerPath
+        } -ArgumentList $zipFile, $TempDir
+        
+        # Assign the returned value to $installerPath
+        $installerPath = $extractResult
+        
         Write-LogMessage "Installer extracted successfully" "SUCCESS"
     }
     catch {
@@ -179,10 +223,12 @@ function Install-Alloy {
     }
     
     # Run silent installation
-    Write-LogMessage "Running silent installation..."
     try {
-        $installArgs = "/S /CONFIG=`"$ConfigFile`" /DISABLEREPORTING=yes"
-        Start-Process -FilePath $installerPath -ArgumentList $installArgs -Wait -NoNewWindow
+        Show-Spinner "Running silent installation..." {
+            param($installerPath, $ConfigFile)
+            $installArgs = "/S /CONFIG=`"$ConfigFile`" /DISABLEREPORTING=yes"
+            Start-Process -FilePath $installerPath -ArgumentList $installArgs -Wait -NoNewWindow
+        } -ArgumentList $installerPath, $ConfigFile
         Write-LogMessage "Alloy installed successfully with reporting disabled" "SUCCESS"
     }
     catch {
@@ -205,10 +251,11 @@ function Deploy-Configuration {
 
     $configUrl = if ($ConfigUrl) { $ConfigUrl } else { $DefaultConfigUrl }
 
-    Write-LogMessage "Downloading configuration from: $configUrl"
-
     try {
-        Invoke-WebRequest -Uri $configUrl -OutFile $ConfigFile
+        Show-Spinner "Downloading configuration from: $configUrl" {
+            param($configUrl, $ConfigFile)
+            Invoke-WebRequest -Uri $configUrl -OutFile $ConfigFile
+        } -ArgumentList $configUrl, $ConfigFile
         Write-LogMessage "Configuration downloaded successfully as $ConfigFile" "SUCCESS"
     }
     catch {
@@ -292,27 +339,25 @@ function Start-AlloyService {
             try {
                 Start-Service -Name "Alloy" -ErrorAction Stop
                 # Wait for service to initialize and check stability (5s) with loading animation
-                $stable = $true
-                $spinner = @('|','/','-','\\')
-                Write-Host -NoNewline "Verifying Alloy service status: "
-                for ($i=0; $i -lt 10; $i++) {
-                    $spinChar = $spinner[$i % $spinner.Length]
-                    Write-Host -NoNewline ("`b" + $spinChar)
-                    Start-Sleep -Milliseconds 500
-                    $svc = Get-Service -Name "Alloy" -ErrorAction SilentlyContinue
-                    if (-not ($svc -and $svc.Status -eq "Running")) {
-                        $stable = $false
-                        Write-Host ""  # Move to new line after spinner
-                        Write-LogMessage "Alloy service stopped or restarted!" "ERROR"
-                        Write-LogMessage "Last 20 lines of service log (if available):" "WARNING"
-                        # Try to get last 20 lines from Windows Event Log
-                        Get-WinEvent -LogName Application -MaxEvents 20 | Where-Object { $_.ProviderName -like '*Alloy*' } | Format-Table -AutoSize
-                        break
+                $result = Show-Spinner "Verifying Alloy service status..." {
+                    $stable = $true
+                    for ($i=0; $i -lt 10; $i++) {
+                        Start-Sleep -Milliseconds 500
+                        $svc = Get-Service -Name "Alloy" -ErrorAction SilentlyContinue
+                        if (-not ($svc -and $svc.Status -eq "Running")) {
+                            $stable = $false
+                            break
+                        }
                     }
+                    return $stable
                 }
-                Write-Host ""  # Ensure spinner line ends
-                if ($stable) {
+                if ($result) {
                     Write-LogMessage "Alloy service verified running correctly after configuration." "SUCCESS"
+                } else {
+                    Write-LogMessage "Alloy service stopped or restarted!" "ERROR"
+                    Write-LogMessage "Last 20 lines of service log (if available):" "WARNING"
+                    # Try to get last 20 lines from Windows Event Log
+                    Get-WinEvent -LogName Application -MaxEvents 20 | Where-Object { $_.ProviderName -like '*Alloy*' } | Format-Table -AutoSize
                 }
             }
             catch {
