@@ -8,435 +8,139 @@
 [![Prometheus Compatible](https://img.shields.io/badge/Prometheus-Compatible-red.svg)](https://prometheus.io/)
 ![GitHub stars](https://img.shields.io/github/stars/it-baer/alloy-aio?style=social)
 
-**Cross-Platform Grafana Alloy Install & Configuration with Platform-Optimized Monitoring Approach**
+**Cross-Platform Grafana Alloy Install & Configuration with Platform-Optimized Monitoring**
 
 </div>
 
 ## 📑 Table of Contents
 
 <p align="center">
-  <a href="#-features">✨ Features</a> •
-  <a href="#-linux">🐧 Linux</a> •
-  <a href="#-windows-systems">🪟 Windows</a> •
-  <a href="#-proxmox-guest-metrics-exporter-integrated">🏢 Proxmox Exporter</a> •
-  <a href="#-requirements">📝 Requirements</a> •
+  <a href="#-key-features">✨ Features</a> •
   <a href="#-quick-install">🚀 Install</a> •
-  <a href="#-configuration-approach">⚙️ Config</a> •
-  <a href="#-what-gets-installed">📦 Installed</a> •
   <a href="#-management">🛠️ Management</a> •
   <a href="#-troubleshooting">🚨 Troubleshooting</a> •
   <a href="#-tested-systems">🖥️ Tested</a> •
   <a href="#-security">🔒 Security</a> •
-  <a href="#-automated-deployment">🤖 Deploy</a> •
   <a href="#-learn-more">📚 More</a> •
-  <a href="#-faq">❓ FAQ</a> •
-  <a href="#-support-development">💜 Support</a> •
   <a href="#-license">📄 License</a> •
   <a href="#-credits">👏 Credits</a>
 </p>
 
+## ✨ Key Features
 
-
-
-## ✨ Features
-
-> **Automatic Detection:** The Installer Automatically Detects Whether the System is Standalone, Proxmox Host or VM/Container, and configures Logs + Metrics or Logs-Only Mode accordingly. No manual selection is required.
-
+> **Automatic Detection:** Installer automatically detects system type (Standalone, Proxmox Host, VM/Container) and configures Logs + Metrics or Logs-Only mode accordingly.
 
 ### 🐧 Linux
-#### Standalone/Host
-- 🎯 **Smart Log Filtering**: Only WARNING+ Logs sent to Loki (Reduces Noise ~80%)
-- 📊 **Full Metrics**: System Metrics collection with Prometheus Integration (Bare Metal, Proxmox Host)
-- 🔒 **Security Focused**: Non-root operation with minimal Permissions
-- 🚀 **Zero Configuration**: Works out-of-the-box with sensible Defaults
-- 🛡️ **Hardened Setup**: Dedicated User, ACL Permissions, systemd Integration
+- **Standalone/Host**: Full logs + metrics monitoring
+- **Virtualized**: Logs-only monitoring (kernel limitations)
 
-#### Virtualized/Container
+### 🪟 Windows
+- **Physical/Host**: Full logs + metrics monitoring
+- **Virtualized**: Logs-only monitoring
 
-- 📊 **Logs Only**: Metrics not collected (Kernel/Namespace Limitations)
-
-<br>
-
-### 🪟 Windows Systems
-
-#### Physical/Host
-- 📊 **Full Monitoring**: Both Logs and System Metrics Collection
-- 🎯 **Advanced Event Log Parsing**: Clean, readable Windows Event Logs with XML Parsing
-- 📈 **System Metrics**: CPU, Memory, Disk, Network Monitoring etc.
-- 🔧 **Service Integration**: Runs as Windows Service (Alloy)
-- 🚀 **PowerShell Install**: Native Windows Installation Experience
-
-#### Virtualized/Container
-- 📊 **Logs Only**: Event Log Collection without System Metrics
-- 🎯 **Smart Event Log Parsing**: Only WARNING+ Events sent to Loki (Reduces Noise)
-- 🚀 **Lightweight Config**: Optimized for Virtual Environments
-
-<br>
-
-### 🏢 Proxmox Guest Metrics Exporter (Integrated)
-
-**Automated, Secure Proxmox Guest Metrics Exporter for Alloy/Prometheus**
-
-- 📦 **Systemd Service:** `pve-guest-exporter.service` (runs as "alloy" User)
-- 🐍 **Python Script:** `/etc/alloy/pve-guest-exporter.py`
-- 🔑 **Token Env:** `/etc/alloy/pve-guest-exporter.env`
-- 🔄 **Idempotent Installer:** Always refreshes Token, Script, and Service
-- 🔒 **Security:** Minimal Permissions
-- 🚀 **Zero Configuration:** Fully automated Setup
-- 📊 **Prometheus Endpoint:** Exposes Guest Metrics at `http://localhost:9221/pve`
-
-### ⚙️ How It Works
-
-- The Installer creates a Dedicated Proxmox API User and Token
-- The Token is stored in `/etc/alloy/pve-guest-exporter.env`
-- The Python Script authenticates to the Proxmox API, collects Guest Metrics, and exposes them for Prometheus/Alloy
+### 🏢 Proxmox Guest Metrics Exporter
+- Automated, secure metrics exporter for Proxmox guests
+- Zero-configuration setup with automatic API user/token management
+- Exposes guest metrics at `http://localhost:9221/pve`
 
 <br>
 
 ## 🚀 Quick Install
-> **⚠️ WARNING:** Running the installation script will overwrite the `alloy@pve` Proxmox user and can replace existing Alloy configuration files in `/etc/alloy/`. Back up your configuration if you have made manual changes.
 
-### 🐧 Linux Installation (Standalone/Host: Logs + Metrics)
+> **⚠️ WARNING:** Running installation scripts can overwrite existing Alloy configurations. Back up your configuration if you have made manual changes.
 
-First, set your Endpoint URLs:
 
+### 🐧 Linux (Standalone/Host)
 ```bash
-LOKI_URL="https://loki.yourdomain.com/loki/api/v1/push"
-```
-```bash
-PROMETHEUS_URL="https://prometheus.yourdomain.com/api/v1/write"
+# One-liner installation (replace URLs with your endpoints)
+sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/IT-BAER/alloy-aio/main/alloy_setup.sh)" -- --loki-url "https://loki.yourdomain.com/loki/api/v1/push" --prometheus-url "https://prometheus.yourdomain.com/api/v1/write"
 ```
 
-Then, run the Setup:
-```bash
-# 1. Clone the repository (required for local file usage)
-git clone https://github.com/IT-BAER/alloy-aio.git && cd alloy-aio
-
-# 2. Run the setup script (auto-detects system type)
-sudo bash alloy_setup.sh --loki-url "$LOKI_URL" --prometheus-url "$PROMETHEUS_URL"
-```
-
-> **Note:** Metrics are only collected on Standalone/Proxmox Host. In Containers/VMs, only Logs are collected.
-
-<br>
-
-### 🪟 Windows Installation (Logs + Metrics)
-
-First, set your Endpoint URLs:
-
+### 🪟 Windows
 ```powershell
-$LOKI_URL = "https://loki.yourdomain.com/loki/api/v1/push"
+# One-liner installation (replace Loki & Prom URLs)
+powershell -ExecutionPolicy Bypass -Command "Set-ExecutionPolicy Bypass -Scope Process -Force; [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -Uri 'https://github.com/IT-BAER/alloy-aio/raw/main/alloy_setup_windows.ps1' -OutFile 'alloy_setup_windows.ps1'; .\alloy_setup_windows.ps1 -LokiUrl 'https://loki.yourdomain.com/loki/api/v1/push' -PrometheusUrl 'https://prometheus.yourdomain.com/api/v1/write'"
 ```
-```powershell
-$PROMETHEUS_URL = "https://prometheus.yourdomain.com/api/v1/write"
-```
-
-Then, run the Setup:
-```powershell
-# Download and run PowerShell Installer (run as Administrator)
-Invoke-WebRequest -Uri "https://github.com/IT-BAER/alloy-aio/raw/main/alloy_setup_windows.ps1" -OutFile "alloy_setup_windows.ps1"
-Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope Process
-.\alloy_setup_windows.ps1 -LokiUrl $LOKI_URL -PrometheusUrl $PROMETHEUS_URL
-```
-
-<br>
 
 ### 📟 Proxmox CT Mass Deployment
-
-
-First, set your Loki URL:
-
 ```bash
-LOKI_URL="https://loki.yourdomain.com/loki/api/v1/push"
+# Deploy to all running containers (replace Loki URL)
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/IT-BAER/alloy-aio/main/proxmox_ct_deploy.sh)" -- --loki-url "https://loki.yourdomain.com/loki/api/v1/push"
+```
+```bash
+# Deploy to specific container (replace Loki URL & Container ID)
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/IT-BAER/alloy-aio/main/proxmox_ct_deploy.sh)" -- --loki-url "https://loki.yourdomain.com/loki/api/v1/push" --container 100
 ```
 
-Then, run the Setup:
-```bash
-# Clean up any existing directory and clone the latest version
-rm -rf alloy-aio
-git clone https://github.com/IT-BAER/alloy-aio.git
-
-# For each running container, copy files and install Alloy
-for container in $(pct list | awk 'NR>1 && $2=="running" {print $1}'); do
-    echo "Processing CT $container..."
-    
-    # Clean up any existing directory in the container
-    pct exec $container -- rm -rf /root/alloy-aio
-    
-    # Create the directory and copy the files
-    pct exec $container -- mkdir -p /root/alloy-aio
-    
-    # Copy each file individually to avoid directory issues
-    cd alloy-aio
-    for file in *; do
-        pct push $container "$file" "/root/alloy-aio/$file"
-    done
-    cd ..
-    
-    # Execute the setup script in the container with explicit URL
-    pct exec $container -- env LOKI_URL="$LOKI_URL" bash -c 'cd /root/alloy-aio && bash alloy_setup.sh --loki-url "$LOKI_URL"'
-    
-    echo "Completed setup for CT $container"
-done
-```
-
-<br>
-
-### 🤖 Proxmox VM Mass Deployment (via Guest Agent)
-> **Note:** This method requires the QEMU Guest Agent to be installed and running on all target VMs.
-
-This one-liner command can be run directly on the Proxmox host shell to automatically detect the OS (Windows/Linux) and deploy Grafana Alloy to all running VMs.
-
-First, set your Endpoint URLs:
+### 🤖 Proxmox VM Mass Deployment
+> **Note:** Requires QEMU Guest Agent on target VMs.
 
 ```bash
-LOKI_URL="https://loki.yourdomain.com/loki/api/v1/push"
+# Deploy to all running VMs (replace Loki URL)
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/IT-BAER/alloy-aio/main/proxmox_vm_deploy.sh)" -- --loki-url "https://loki.yourdomain.com/loki/api/v1/push"
 ```
-
-Then, run the Setup:
-
 ```bash
-for vmid in $(qm list | awk 'NR>1 && $3=="running" {print $1}'); do 
-    echo "Processing VM $vmid..."; 
-    if qm guest cmd $vmid ping >/dev/null 2>&1; then 
-        if qm guest exec $vmid "cmd.exe" /c ver >/dev/null 2>&1; then 
-            echo "🪟  Windows VM detected..."; 
-            qm guest exec $vmid --timeout 60 powershell.exe "Set-ExecutionPolicy Bypass -Scope Process -Force; \$ProgressPreference = 'SilentlyContinue'; [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; Remove-Item -Path 'C:\WINDOWS\TEMP\alloy-install' -Recurse -Force -ErrorAction SilentlyContinue; Remove-Item -Path 'C:\alloy_setup.ps1' -Force -ErrorAction SilentlyContinue; Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/IT-BAER/alloy-aio/main/alloy_setup_windows.ps1' -OutFile 'C:\alloy_setup.ps1'; & 'C:\alloy_setup.ps1' -LokiUrl '$LOKI_URL' -NonInteractive; Remove-Item -Path 'C:\alloy_setup.ps1' -Force -ErrorAction SilentlyContinue;"
-        else 
-            echo "🐧  Linux VM detected..."; 
-            qm guest exec $vmid --timeout 60 -- bash -c "cd /tmp && rm -f alloy_setup.sh && wget -q https://raw.githubusercontent.com/IT-BAER/alloy-aio/main/alloy_setup.sh && chmod +x alloy_setup.sh && DEBIAN_FRONTEND=noninteractive sudo bash alloy_setup.sh --loki-url '$LOKI_URL' --non-interactive && rm -f alloy_setup.sh"
-        fi
-    else 
-        echo "⚠️  QEMU Guest Agent not available for VM $vmid"; 
-    fi
-done
+# Deploy to specific VM (replace Loki URL & VM ID)
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/IT-BAER/alloy-aio/main/proxmox_vm_deploy.sh)" -- --loki-url "https://loki.yourdomain.com/loki/api/v1/push" --vm 100
 ```
-
-**Before running, make sure to replace the placeholder URLs with your actual Loki and Prometheus endpoints.**
-
-<br>
-
-## ⚙️ Configuration Approach
-
-This Project uses a **Platform-Aware** Configuration Strategy:
-
-- ✅ **Validated Config**: All Configurations pass Syntax Validation before being committed
-- 🐧 **Linux**: Metrics+Logs/Logs-only Configuration based on Platform
-- 🪟 **Windows**:  Monitoring with Logs + Metrics for full System Visibility
-- 🎛️ **Custom Override**: Check FAQ
-- 🌐 **Internet Required**: Installation requires Internet Connection for Configuration Download
-
-This ensures you always get a working, tested Configuration optimized for each Platform.
-
-<br>
-
-## 📦 What Gets Installed
-
-<div align="center">
-
-### 🐧 Linux Standalone/Proxmox Host (Logs + Metrics)
-| 🏗️ **System Components** | 📊 **Monitoring Capabilities** | 🔧 **Configuration** |
-| :--: | :--: | :--: |
-| Grafana Alloy (latest stable, systemd service) | System & application log collection (journal, files) | Automated config deployment & validation |
-| Dedicated `alloy` user with ACLs | Smart log filtering (WARNING+ only) | Secure, non-root operation, minimal permissions |
-| Prometheus metrics exporter (node/system) | Full host metrics (CPU, memory, disk, network, uptime, etc.) | Efficient log shipping to Loki, metrics to Prometheus |
-| Proxmox guest metrics exporter (if Proxmox host) | Guest VM/CT metrics via local API | Automated Proxmox API user/token/service management |
-
-<br>
-
-### 🐧 Linux Virtualized/Container (Logs Only)
-| 🏗️ **System Components** | 📊 **Monitoring Capabilities** | 🔧 **Configuration** |
-| :--: | :--: | :--: |
-| Grafana Alloy (latest stable, systemd service) | System & application log collection (journal, files) | Automated config deployment & validation |
-| Dedicated `alloy` user with ACLs | Smart log filtering (WARNING+ only) | Secure, non-root operation, minimal permissions |
-| Lightweight logs-only config | Container/VM-aware hostname labeling | Efficient log shipping to Loki |
-| No metrics collection (kernel/namespace limits) | Ephemeral log handling | Resource-efficient configuration |
-
-<br>
-
-### 🪟 Windows Systems
-
-#### Physical/Host (Logs + Metrics)
-| 🏗️ **System Components** | 📊 **Monitoring Capabilities** | 🔧 **Configuration** |
-| :--: | :--: | :--: |
-| Grafana Alloy (latest stable, Windows service) | Structured Event Log collection (Application, System, Security) | Automated config download & deployment |
-| System metrics exporter | Full host metrics (CPU, memory, disk, network, services) | Efficient log shipping to Loki, metrics to Prometheus |
-| Runs as LocalSystem service by default | Smart log filtering (WARNING+ only) | Automated service installation & updates |
-| Event log and metrics forwarding | Windows service integration | Configuration validation & troubleshooting guidance |
-
-#### Virtualized/Proxmox VM (Logs Only)
-| 🏗️ **System Components** | 📊 **Monitoring Capabilities** | 🔧 **Configuration** |
-| :--: | :--: | :--: |
-| Grafana Alloy (latest stable, Windows service) | Structured Event Log collection (Application, System, Security) | Automated config download & deployment |
-| Lightweight logs-only config | VM-aware hostname labeling | Efficient log shipping to Loki |
-| Runs as LocalSystem service by default | Smart log filtering (WARNING+ only) | Resource-efficient configuration |
-| Event log forwarding only | No metrics collection | Proxmox-optimized deployment
-
-</div>
-
 <br>
 
 ## 🛠️ Management
 
 ### 🐧 Linux Service Control
 ```bash
-# Check status
-sudo systemctl status alloy
-```
-```bash
-# View logs  
-sudo journalctl -u alloy -f
-```
-```bash
-# Restart service
-sudo systemctl restart alloy
+sudo systemctl status alloy     # Check status
+sudo journalctl -u alloy -f     # View logs
+sudo systemctl restart alloy    # Restart service
 ```
 
 ### 🪟 Windows Service Control
 ```powershell
-# Check status
-Get-Service "Alloy"
+Get-Service "Alloy"             # Check status
+Restart-Service "Alloy"         # Restart service
 ```
-```powershell
-# View logs
-Get-WinEvent -LogName Application -Source "Alloy" | Select-Object -First 10
-```
-```powershell
-# Restart service
-Restart-Service "Alloy"
-```
-
-### ⚙️ Configuration Files
-
-#### 🐧 Linux Configuration
-```bash
-# Edit config (logs only)
-sudo nano /etc/alloy/aio-linux-logs.alloy
-```
-```bash
-# Edit config (Full)
-sudo nano /etc/alloy/aio-linux.alloy
-```
-```bash
-# Validate syntax
-sudo alloy fmt /etc/alloy/aio-linux-logs.alloy --test
-```
-```bash
-# Apply changes
-sudo systemctl restart alloy
-```
-
-#### 🪟 Windows Configuration
-```powershell
-# Edit unified config (logs + metrics)
-notepad "C:\Program Files\GrafanaLabs\Alloy\aio-windows.alloy"
-```
-```powershell
-# Validate syntax (run as Administrator)
-& "C:\Program Files\GrafanaLabs\Alloy\alloy-windows-amd64.exe" fmt "C:\Program Files\GrafanaLabs\Alloy\aio-windows.alloy" --test
-```
-```powershell
-# Apply changes
-Restart-Service "Alloy"
-```
-
-### 🔍 Health Check
-
-#### 🐧 Linux
-```bash
-# Alloy metrics endpoint
-curl http://localhost:12345/metrics
-
-# Web UI (if enabled)
-# http://localhost:12345
-```
-
-#### 🪟 Windows
-```powershell
-# Alloy metrics endpoint
-Invoke-WebRequest -Uri "http://localhost:12345/metrics"
-
-# Web UI (if enabled)
-# http://localhost:12345
-```
+<br>
 
 ## 🚨 Troubleshooting
 
-### 🐧 Linux Issues
+### Common Issues
 
-**🔍 Service won't start:**
+**Service won't start:**
 ```bash
+# Linux
 sudo systemctl status alloy
 sudo journalctl -u alloy --no-pager
+
+# Windows
+Get-Service "Alloy"
+Get-WinEvent -LogName Application -Source "Alloy" | Select-Object -First 10
 ```
 
-**🔐 Permission errors:**
+**Permission errors (Linux):**
 ```bash
 sudo usermod -aG adm,systemd-journal alloy
 sudo setfacl -R -m u:alloy:rx /var/log/
 sudo systemctl restart alloy
 ```
 
-**✅ Config validation:**
+**Validate configuration:**
 ```bash
+# Linux
 sudo alloy fmt --test /etc/alloy/aio-linux.alloy
-```
 
-<br>
-
-### 🪟 Windows Issues
-
-**🔍 Service won't start:**
-```powershell
-Get-Service "Alloy"
-Get-WinEvent -LogName Application -Source "Alloy" | Select-Object -First 10
-```
-
-**🔐 Permission errors:**
-```powershell
-# Run as Administrator to check service permissions
-Get-Acl "C:\Program Files\GrafanaLabs\Alloy\*"
-```
-
-**✅ Config validation:**
-```powershell
-# Run as Administrator
+# Windows (run as Administrator)
 & "C:\Program Files\GrafanaLabs\Alloy\alloy-windows-amd64.exe" fmt "C:\Program Files\GrafanaLabs\Alloy\aio-windows.alloy" --test
 ```
-
-<br>
-
-### 🏢 Proxmox Issues
-**Service won't start or Metrics Endpoint returns error:**
-```bash
-sudo systemctl status pve-guest-exporter
-sudo journalctl -u pve-guest-exporter --no-pager
-```
-
-**Token/Authentication Issues:**
-- The Installer always refreshes the Proxmox API token and updates `/etc/alloy/pve-guest-exporter.env`
-- If you see Authentication Errors, rerun the Installer to regenerate the Token and env file
-
-**Validate Exporter Metrics Endpoint:**
-```bash
-curl http://localhost:9221/pve
-```
-
-**Manual restart after Config/Token changes:**
-```bash
-sudo systemctl restart pve-guest-exporter
-```
-
 <br>
 
 ## 🖥️ Tested Systems
 
-| OS | Version | Logs | Metrics | Status | Notes |
-|---|---------|------|---------|---------|-------|
-| Proxmox (Host)| 8.4.1 | ✅ | ✅ | ✅ | Full logs + metrics |
-| Debian (Virtualized)| 12+ | ✅ | ❌ | ✅ | Logs only (VM) |
-| Windows (Physical)| 10/11/Server 2022+ | ✅ | ✅ | ✅ | Full logs + metrics |
-| Windows (Proxmox VM)| 10/11/Server 2022+ | ✅ | ❌ | ✅ | Logs only (VM) |
+| OS | Version | Logs | Metrics | Status |
+|---|---------|------|---------|---------|
+| Proxmox (Host)| 8.4.1 | ✅ | ✅ | ✅ |
+| Debian (Virtualized)| 12+ | ✅ | ❌ | ✅ |
+| Windows (Physical)| 10/11/Server 2022+ | ✅ | ✅ | ✅ |
+| Windows (Proxmox VM)| 10/11/Server 2022+ | ✅ | ❌ | ✅ |
 
 <br>
 
@@ -447,23 +151,6 @@ sudo systemctl restart pve-guest-exporter
 - 🔐 **Minimal permissions**: ACL-based log access only
 - 📁 **Secure configuration**: 640 Permissions on Config Files
 
-## 🤖 Automated Deployment
-
-### 🚀 Cross-Platform Deployment
-
-The Installation Scripts are designed for automated Deployment without User Interaction:
-
-#### 🐧 Linux Features
-- **🔄 Non-interactive Mode**: Automatically handles Prompts
-- **📦 Package Updates**: No manual Confirmation required
-- **🧹 Clean Exit**: Removes temporary Files
-
-#### 🪟 Windows Features
-- **🔄 Silent Installation**: Automated MSI Installer Download and Deployment
-- **📦 Service Setup**: Automatic Service Registration and startup Configuration (Alloy)
-- **🧹 Clean Deployment**: PowerShell-based Installation with proper Error handling
-
-
 <br>
 
 ## 📚 Learn More
@@ -474,115 +161,9 @@ The Installation Scripts are designed for automated Deployment without User Inte
 
 <br>
 
-## ❓ FAQ
+## 📄 License
 
-### 🔍 Alloy Service Won't Start After Installation
-
-#### 🐧 Linux
-If the Alloy Service fails to start after Installation:
-
-1. **🔍 Check Service Status and Logs**:
-   ```bash
-   sudo systemctl status alloy
-   sudo journalctl -u alloy --no-pager
-   ```
-
-2. **🔐 Verify Permissions**:
-   ```bash
-   sudo usermod -aG adm,systemd-journal alloy
-   sudo setfacl -R -m u:alloy:rx /var/log/
-   sudo systemctl restart alloy
-   ```
-
-3. **✅ Validate Configuration**:
-   ```bash
-   sudo alloy fmt --test /etc/alloy/aio-linux.alloy
-   ```
-
-#### 🪟 Windows
-If the Alloy Service fails to start after Installation:
-
-1. **🔍 Check Service Status and Event Logs**:
-   ```powershell
-   Get-Service "Alloy"
-   Get-WinEvent -LogName Application -Source "Alloy" | Select-Object -First 10
-   ```
-
-2. **🔐 Verify Service Permissions**:
-   ```powershell
-   # Run as Administrator
-   Get-Acl "C:\Program Files\GrafanaLabs\Alloy\"
-   ```
-
-3. **✅ Validate Configuration**:
-   ```powershell
-   # Run as Administrator
-   & "C:\Program Files\GrafanaLabs\Alloy\alloy-windows-amd64.exe" fmt "C:\Program Files\GrafanaLabs\Alloy\aio-windows.alloy" --test
-   ```
-
-### 🔍 No Logs/Metrics Appearing in Grafana
-
-If you're not seeing Data in your Monitoring Stack:
-
-1. **🔍 Check Alloy Metrics Endpoint**: `curl http://localhost:12345/metrics` (Linux) or <br>`Invoke-WebRequest http://localhost:12345/metrics` (Windows)
-2. **🌐 Verify Endpoint URLs**: Ensure Loki/Prometheus URLs are accessible from the System
-3. **🔑 Check Authentication**: Verify API Keys or Basic Auth Credentials are correct
-4. **📊 Check Alloy UI**: Visit `http://localhost:12345` for Component Status
-5. **🎯 Platform-specific**:
-   - **Linux**: Verify Log File Permissions and systemd journal access
-   - **Windows**: Check Event Log Permissions and Windows Exporter functionality
-
-### ❓ How to Customize the Configuration?
-
-#### 🐧 Linux
-- **🔄 Repository-based**: Default Configs are pulled from the Repository on Installation
-- **🎛️ Local override**: Create a new Config other than `aio-linux.alloy` or `aio-linux-log.alloy`. <br> If running multiple Configs, change the `CONFIG_FILE` value in `/etc/default/alloy` to the Config Path.
-- **✅ Always validate**: Run `sudo alloy fmt --test` before restarting the Service
-- **🔄 Apply changes**: `sudo systemctl restart alloy` after modifications
-
-#### 🪟 Windows
-- **🔄 Repository-based**: Default Configs downloaded during PowerShell Installation
-- **🎛️ Local override**: Create a new Config other than `aio-windows.alloy` (f.e. your_config.alloy) and change the Registry (regedit) value of **Arguments** in `HKEY_LOCAL_MACHINE\SOFTWARE\GrafanaLabs\Alloy` to <br> `run` <br>
-`C:\Program Files\GrafanaLabs\Alloy\your_config.alloy` <br>
-`--storage.path=%PROGRAMDATA%\GrafanaLabs\Alloy\data` <br>
-**Make sure that each Argument is on its own line!**
-- **✅ Always validate**: Run Alloy fmt command as Administrator before restarting
-- **🔄 Apply changes**: `Restart-Service "Alloy"` after modifications
-
-### 🔍 High Resource Usage
-
-If Alloy is consuming too many Resources:
-
-#### 🐧 Linux
-1. **📊 Monitor usage**: Check Memory and CPU via `top` or `htop`
-2. **🎯 Adjust log levels**: Modify Log Collection Rules to be more selective
-3. **⚙️ Tune configuration**: Adjust Collection Intervals
-
-
-#### 🪟 Windows
-1. **📊 Monitor metrics**: Check Task Manager or Performance Monitor
-2. **🎯 Adjust collection**: Tune Event Log Queries and Metrics scraping Intervals
-3. **⚙️ Windows-specific**: Consider disabling specific Performance Counters if not needed
-
-### 🔧 "Which Services Should Be Restarted?" Prompt in Containers (Linux)
-
-If you see a Dialog asking about Service Restarts during Installation (common in Proxmox Containers):
-
-**This is now automatically handled!** The Installation Script:
-
-1. **🤖 Configures non-interactive mode**: Sets `DEBIAN_FRONTEND=noninteractive`
-2. **📦 Package handling**: Uses proper dpkg options to avoid prompts
-3. **🧹 Clean exit**: Removes temporary files after installation
-
-<br>
-
-## 📚 Learn More
-
-- [Grafana Alloy Documentation](https://grafana.com/docs/alloy/)
-- [Loki Documentation](https://grafana.com/docs/loki/)
-- [Prometheus Documentation](https://prometheus.io/docs/)
-- [Windows Event Log Integration](https://grafana.com/docs/alloy/latest/reference/components/loki.source.windowsevent/)
-- [Prometheus Windows Exporter](https://grafana.com/docs/alloy/latest/reference/components/prometheus.exporter.windows/)
+This project is licensed under the [AGPL-3.0](LICENSE) license.
 
 <br>
 
@@ -596,15 +177,7 @@ If you find this Project useful, consider supporting this and future Development
 
 <br>
 
-## 📄 License
-
-This project is licensed under the [AGPL-3.0](LICENSE) license.
-
-<br>
-
 ## 👏 Credits
 
 - [Grafana Labs](https://grafana.com/) - For the amazing Grafana Alloy project
 - [Grafana Community](https://grafana.com/community/) - For continuous support and feedback
-
-
