@@ -121,7 +121,14 @@ deploy_to_container() {
     pct exec $container -- mkdir -p /root/alloy-aio
     
     # Copy each file individually to avoid directory issues
-    cd alloy-aio
+    # Handle case when script is executed via curl (dirname "$0" would fail)
+    if [[ -f "$0" ]]; then
+        cd "$(dirname "$0")/alloy-aio"
+    else
+        # Fallback to current directory if script is executed via curl
+        cd "alloy-aio"
+    fi
+    
     for file in *; do
         if [[ -f "$file" ]]; then
             pct push $container "$file" "/root/alloy-aio/$file" 2>/dev/null || {
@@ -155,9 +162,15 @@ main() {
     check_pct
     
     # Check if alloy-aio directory exists
-    if [[ ! -d "alloy-aio" ]]; then
+    # Handle case when script is executed via curl
+    local alloy_aio_dir="alloy-aio"
+    if [[ -f "$0" ]]; then
+        alloy_aio_dir="$(dirname "$0")/alloy-aio"
+    fi
+    
+    if [[ ! -d "$alloy_aio_dir" ]]; then
         log "Cloning alloy-aio repository..."
-        if git clone https://github.com/IT-BAER/alloy-aio.git; then
+        if git clone https://github.com/IT-BAER/alloy-aio.git "$alloy_aio_dir"; then
             log_success "Repository cloned successfully"
         else
             log_error "Failed to clone repository"
@@ -165,7 +178,7 @@ main() {
         fi
     else
         log "Updating alloy-aio repository..."
-        cd alloy-aio
+        cd "$alloy_aio_dir"
         if git pull; then
             log_success "Repository updated successfully"
         else

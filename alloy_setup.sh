@@ -66,8 +66,15 @@ trap 'log_error "Script terminated"; cleanup; exit 143' TERM
 trap 'cleanup' EXIT
 
 # Default configuration file paths (local, after git clone)
-DEFAULT_STANDALONE_CONFIG_PATH="$(dirname "$0")/aio-linux.alloy"
-DEFAULT_PROXMOX_CONFIG_PATH="$(dirname "$0")/aio-linux-logs.alloy"
+# Handle case when script is executed via curl (dirname "$0" would fail)
+if [[ -f "$0" ]]; then
+    DEFAULT_STANDALONE_CONFIG_PATH="$(dirname "$0")/aio-linux.alloy"
+    DEFAULT_PROXMOX_CONFIG_PATH="$(dirname "$0")/aio-linux-logs.alloy"
+else
+    # Fallback URLs for when script is executed via curl
+    DEFAULT_STANDALONE_CONFIG_PATH="https://raw.githubusercontent.com/IT-BAER/alloy-aio/main/aio-linux.alloy"
+    DEFAULT_PROXMOX_CONFIG_PATH="https://raw.githubusercontent.com/IT-BAER/alloy-aio/main/aio-linux-logs.alloy"
+fi
 
 # User-provided endpoints (can be set via command line)
 LOKI_URL=""
