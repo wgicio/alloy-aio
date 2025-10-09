@@ -36,6 +36,7 @@
 ### 🐧 Linux
 - **Standalone/Host**: Full logs + metrics monitoring
 - **Virtualized**: Logs-only monitoring (kernel limitations)
+- **Optional override**: Add `--force` to install full logs + metrics on virtual servers (for example, VPS instances)
 
 ### 🪟 Windows
 - **Physical/Host**: Full logs + metrics monitoring
@@ -57,6 +58,9 @@
 ```bash
 # One-liner installation (replace URLs with your endpoints)
 sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/IT-BAER/alloy-aio/main/alloy_setup.sh)" -- --loki-url "https://loki.yourdomain.com/loki/api/v1/push" --prometheus-url "https://prometheus.yourdomain.com/api/v1/write"
+
+# Force full install on virtual machines (VPS, cloud instances)
+sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/IT-BAER/alloy-aio/main/alloy_setup.sh)" -- --force --loki-url "https://loki.yourdomain.com/loki/api/v1/push" --prometheus-url "https://prometheus.yourdomain.com/api/v1/write"
 ```
 
 ### 🪟 Windows

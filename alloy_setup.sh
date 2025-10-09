@@ -79,6 +79,7 @@ fi
 # User-provided endpoints (can be set via command line)
 LOKI_URL=""
 PROMETHEUS_URL=""
+FORCE_FULL_INSTALL=false
 
 # Platform detection
 IS_LINUX=false
@@ -203,6 +204,7 @@ show_usage() {
     echo "  -l, --loki-url URL           Loki endpoint URL"
     echo "  -c, --config-url URL         Custom configuration file URL"
     echo "  -p, --prometheus-url URL     Prometheus endpoint URL"
+    echo "  -f, --force                  Force full observability install (ignore virtualization detection)"
     echo
     echo "Examples:"
     echo "  # Basic Linux installation (auto-detects system type):"
@@ -313,6 +315,7 @@ detect_proxmox() {
         export SYSTEM_TYPE="standalone"
     fi
     export IS_PROXMOX_HOST
+    export DETECTED_SYSTEM_TYPE="$SYSTEM_TYPE"
 }
 
 # Update package lists
@@ -849,6 +852,10 @@ parse_args() {
                 PROMETHEUS_URL="$2"
                 shift 2
                 ;;
+            -f|--force)
+                FORCE_FULL_INSTALL=true
+                shift
+                ;;
             *)
                 log_error "Unknown option: $1"
                 show_usage
@@ -863,6 +870,9 @@ parse_args() {
     fi
     if [[ -n "$PROMETHEUS_URL" ]]; then
         log "Will configure Prometheus endpoint: $PROMETHEUS_URL"
+    fi
+    if [[ "$FORCE_FULL_INSTALL" == true ]]; then
+        log "Force installation enabled: full observability will be configured regardless of virtualization"
     fi
 }
 
@@ -1041,7 +1051,19 @@ main() {
     check_root
     check_system
     detect_proxmox
+    if [[ "$FORCE_FULL_INSTALL" == true ]]; then
+        if [[ "$SYSTEM_TYPE" == "proxmox-host" ]]; then
+            log_warning "--force flag ignored for Proxmox hosts to preserve host-specific setup"
+        else
+            log_warning "--force flag active: overriding detected system type ($SYSTEM_TYPE) to standalone"
+            SYSTEM_TYPE="standalone"
+            IS_PROXMOX_HOST=false
+        fi
+    fi
     log "Detected system type: $SYSTEM_TYPE"
+    if [[ -n "${DETECTED_SYSTEM_TYPE:-}" && "$DETECTED_SYSTEM_TYPE" != "$SYSTEM_TYPE" ]]; then
+        log "Original detection: $DETECTED_SYSTEM_TYPE"
+    fi
     configure_noninteractive_mode
     update_packages
     install_prerequisites
