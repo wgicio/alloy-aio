@@ -892,7 +892,7 @@ setup_proxmox_exporter_user_and_token() {
 
     # Create custom AlloyMonitor role if it doesn't exist
     log "Creating custom AlloyMonitor role..."
-    role_output=$(run_with_spinner "pveum role add AlloyMonitor -privs \"VM.Audit,VM.Monitor,Datastore.Audit,Sys.Audit,Pool.Audit\" 2>&1" "Creating AlloyMonitor role..." || echo "ERROR") || true
+    role_output=$(run_with_spinner "pveum role add AlloyMonitor -privs \"VM.Audit,Datastore.Audit,Sys.Audit,Pool.Audit\" 2>&1" "Creating AlloyMonitor role..." || echo "ERROR") || true
     if echo "$role_output" | grep -qi 'already exists'; then
         log_success "AlloyMonitor role already exists"
     elif echo "$role_output" | grep -qi 'ERROR'; then
