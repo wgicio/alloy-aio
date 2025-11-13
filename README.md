@@ -123,6 +123,10 @@ Get-Service "Alloy"
 Get-WinEvent -LogName Application -Source "Alloy" | Select-Object -First 10
 ```
 
+**Prometheus is not showing metrics:**
+
+Make sure you add ```--web.enable-remote-write-receiver``` as ARG on your Prometheus instance.
+
 **Permission errors (Linux):**
 ```bash
 sudo usermod -aG adm,systemd-journal alloy
