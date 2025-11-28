@@ -371,6 +371,8 @@ install_prerequisites() {
         if [[ ! -d "$venv_dir" ]]; then
             run_with_spinner "python3 -m venv $venv_dir" "Creating Python virtualenv for exporter..." || error_exit "Failed to create virtualenv for exporter"
         fi
+        # Ensure pip is available in the virtualenv (required for Debian 13/Proxmox 9.x where venv does not include pip by default)
+        run_with_spinner "$venv_dir/bin/python -m ensurepip --upgrade > /dev/null 2>&1" "Installing pip in virtualenv..." || error_exit "Failed to install pip in virtualenv"
         # Use the virtualenv's pip to install dependencies (best practice)
         run_with_spinner "$venv_dir/bin/pip install --upgrade pip > /dev/null 2>&1 && $venv_dir/bin/pip install gunicorn flask requests > /dev/null 2>&1" "Installing gunicorn, flask, requests in exporter virtualenv..." || error_exit "Failed to install gunicorn/flask/requests in exporter virtualenv"
         log_success "gunicorn, flask, requests installed in exporter virtualenv ($venv_dir)"
