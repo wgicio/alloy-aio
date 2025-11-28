@@ -932,7 +932,7 @@ setup_proxmox_exporter_user_and_token() {
     fi
 
     # Force delete existing token if it exists (overwrite behavior)
-    if pveum user token list "$pve_user" | grep '^│' | grep -v 'tokenid' | awk '{print $2}' | grep -Fxq "$token_id"; then
+    if pveum user token list "$pve_user" | grep -E '^[│|]' | grep -v 'tokenid' | awk '{print $2}' | grep -Fxq "$token_id"; then
         log "Deleting existing API token $pve_user!$token_id to create fresh token..."
         run_with_spinner "pveum user token delete \"$pve_user\" \"$token_id\" 2>/dev/null" "Deleting existing API token..." || true
         log_success "Existing token deleted"
@@ -941,10 +941,10 @@ setup_proxmox_exporter_user_and_token() {
     token_output=$(run_with_spinner "pveum user token add \"$pve_user\" \"$token_id\" --privsep 0 2>&1" "Creating API token for $pve_user..." || echo "ERROR")
     # Try to extract the token value from the Proxmox table output
     token_value=""
-    value_line=$(echo "$token_output" | grep -E '^│[[:space:]]*value[[:space:]]*│')
+    value_line=$(echo "$token_output" | grep -E '^[│|][[:space:]]*value[[:space:]]*[│|]')
     if [[ -n "$value_line" ]]; then
         # Extract the value between the second and third pipe, trim whitespace
-        token_value=$(echo "$value_line" | awk -F'│' '{gsub(/^ +| +$/,"",$3); print $3}')
+        token_value=$(echo "$value_line" | awk -F'[│|]' '{gsub(/^ +| +$/,"",$3); print $3}')
     fi
     # Fallback: Try to extract a JWT (three dot-separated segments)
     if [[ -z "$token_value" ]]; then
