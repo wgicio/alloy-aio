@@ -70,16 +70,19 @@ trap 'cleanup' EXIT
 if [[ -f "$0" ]]; then
     DEFAULT_STANDALONE_CONFIG_PATH="$(dirname "$0")/aio-linux.alloy"
     DEFAULT_PROXMOX_CONFIG_PATH="$(dirname "$0")/aio-linux-logs.alloy"
+    PERM_FIXER_SCRIPT_PATH="$(dirname "$0")/alloy_fix_permissions.sh"
 else
     # Fallback URLs for when script is executed via curl
     DEFAULT_STANDALONE_CONFIG_PATH="https://raw.githubusercontent.com/IT-BAER/alloy-aio/main/aio-linux.alloy"
     DEFAULT_PROXMOX_CONFIG_PATH="https://raw.githubusercontent.com/IT-BAER/alloy-aio/main/aio-linux-logs.alloy"
+    PERM_FIXER_SCRIPT_PATH="https://raw.githubusercontent.com/IT-BAER/alloy-aio/main/alloy_fix_permissions.sh"
 fi
 
 # User-provided endpoints (can be set via command line)
 LOKI_URL=""
 PROMETHEUS_URL=""
 FORCE_FULL_INSTALL=false
+INSTALL_PERM_TIMER=false
 
 # Platform detection
 IS_LINUX=false
@@ -205,6 +208,7 @@ show_usage() {
     echo "  -c, --config-url URL         Custom configuration file URL"
     echo "  -p, --prometheus-url URL     Prometheus endpoint URL"
     echo "  -f, --force                  Force full observability install (ignore virtualization detection)"
+    echo "  --install-perm-timer         Install systemd timer to auto-fix new log permissions"
     echo
     echo "Examples:"
     echo "  # Basic Linux installation (auto-detects system type):"
@@ -216,12 +220,18 @@ show_usage() {
     echo "  # With custom configuration URL:"
     echo "  sudo $0 --config-url 'https://example.com/custom-config.alloy'"
     echo
+    echo "  # Install with auto-permission fixer (for systems that add new logs frequently):"
+    echo "  sudo $0 --install-perm-timer --loki-url 'https://loki.example.com/loki/api/v1/push'"
+    echo
     echo "Automatic configuration selection:"
     echo "  • Standalone Linux & Proxmox VE Host: aio-linux.alloy (logs + metrics)"
     echo "  • Proxmox VMs & Containers: aio-linux-logs.alloy (logs only)"
     echo "  • All configs pulled from: https://github.com/IT-BAER/alloy-aio"
     echo
     echo "Note: Proxmox host metrics are collected by Alloy directly. Guest metrics and prometheus-pve-exporter are not supported."
+    echo
+    echo "Note: If new applications are installed after Alloy, their log files may need"
+    echo "      permission fixes. Use --install-perm-timer or run alloy_fix_permissions.sh"
     echo
     echo "Note: For Windows installation, use the PowerShell script:"
     echo "      alloy_setup_windows.ps1"
@@ -468,6 +478,88 @@ setup_permissions() {
 	fi
 	
 	log_success "User permissions configured using ACL-only approach"
+}
+
+# Install systemd timer for automatic permission fixing
+# This ensures new log files created after Alloy installation get proper permissions
+install_permission_fixer_timer() {
+    if [[ "$INSTALL_PERM_TIMER" != true ]]; then
+        return 0
+    fi
+    
+    log "Installing permission fixer timer for automatic log permission management..."
+    
+    local script_path="/usr/local/bin/alloy-fix-permissions"
+    local service_path="/etc/systemd/system/alloy-fix-permissions.service"
+    local timer_path="/etc/systemd/system/alloy-fix-permissions.timer"
+    
+    # Download or copy the permission fixer script
+    if [[ "$PERM_FIXER_SCRIPT_PATH" == https://* ]] || [[ "$PERM_FIXER_SCRIPT_PATH" == http://* ]]; then
+        # Download from URL
+        if run_with_spinner "wget -q -O \"$script_path\" \"$PERM_FIXER_SCRIPT_PATH\"" "Downloading permission fixer script..."; then
+            log_success "Permission fixer script downloaded to $script_path"
+        else
+            log_error "Failed to download permission fixer script"
+            return 1
+        fi
+    else
+        # Copy local file
+        if [[ -f "$PERM_FIXER_SCRIPT_PATH" ]]; then
+            if run_with_spinner "cp \"$PERM_FIXER_SCRIPT_PATH\" \"$script_path\"" "Copying permission fixer script..."; then
+                log_success "Permission fixer script installed to $script_path"
+            else
+                log_error "Failed to copy permission fixer script"
+                return 1
+            fi
+        else
+            log_error "Permission fixer script not found: $PERM_FIXER_SCRIPT_PATH"
+            return 1
+        fi
+    fi
+    
+    chmod 755 "$script_path"
+    
+    # Create systemd service unit
+    cat > "$service_path" << 'EOF'
+[Unit]
+Description=Fix log file permissions for Grafana Alloy
+Documentation=https://github.com/IT-BAER/alloy-aio
+After=network.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/alloy-fix-permissions --quiet
+User=root
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    log_success "Created service unit: $service_path"
+    
+    # Create systemd timer unit
+    cat > "$timer_path" << 'EOF'
+[Unit]
+Description=Periodically fix log file permissions for Grafana Alloy
+Documentation=https://github.com/IT-BAER/alloy-aio
+
+[Timer]
+# Run 5 minutes after boot
+OnBootSec=5min
+# Run every hour
+OnUnitActiveSec=1h
+# Add randomized delay to prevent thundering herd
+RandomizedDelaySec=5min
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+EOF
+    log_success "Created timer unit: $timer_path"
+    
+    # Reload systemd and enable timer
+    systemctl daemon-reload
+    systemctl enable --now alloy-fix-permissions.timer
+    log_success "Permission fixer timer enabled and started"
 }
 
 
@@ -858,6 +950,10 @@ parse_args() {
                 FORCE_FULL_INSTALL=true
                 shift
                 ;;
+            --install-perm-timer)
+                INSTALL_PERM_TIMER=true
+                shift
+                ;;
             *)
                 log_error "Unknown option: $1"
                 show_usage
@@ -875,6 +971,9 @@ parse_args() {
     fi
     if [[ "$FORCE_FULL_INSTALL" == true ]]; then
         log "Force installation enabled: full observability will be configured regardless of virtualization"
+    fi
+    if [[ "$INSTALL_PERM_TIMER" == true ]]; then
+        log "Will install permission fixer timer for automatic log permission management"
     fi
 }
 
@@ -1083,6 +1182,8 @@ main() {
     else
         setup_permissions
     fi
+    # Install permission fixer timer if requested (helps with logs created after installation)
+    install_permission_fixer_timer
     deploy_configuration
     configure_service
     verify_installation

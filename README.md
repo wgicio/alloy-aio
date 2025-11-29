@@ -134,6 +134,36 @@ sudo setfacl -R -m u:alloy:rx /var/log/
 sudo systemctl restart alloy
 ```
 
+**Permission denied for NEW log files (after Alloy installation):**
+
+When you install new applications (like CrowdSec, fail2ban, etc.) after Alloy is already installed, their log files won't automatically have the correct permissions. You'll see errors like:
+```
+failed to tail the file: open /var/log/crowdsec-firewall-bouncer.log: permission denied
+```
+
+**Quick fix for specific file:**
+```bash
+sudo setfacl -m u:alloy:r /var/log/crowdsec-firewall-bouncer.log
+sudo systemctl restart alloy
+```
+
+**Fix all log files at once:**
+```bash
+# Using the permission fixer script (included in this repo)
+sudo bash alloy_fix_permissions.sh
+
+# Or manually fix all logs
+sudo setfacl -R -m u:alloy:rx /var/log/
+sudo setfacl -R -d -m u:alloy:rx /var/log/
+sudo systemctl restart alloy
+```
+
+**Automatic fix (install systemd timer):**
+```bash
+# Install timer that runs hourly to fix permissions automatically
+sudo bash alloy_fix_permissions.sh --install-timer
+```
+
 **Validate configuration:**
 ```bash
 # Linux
