@@ -82,7 +82,7 @@ fi
 LOKI_URL=""
 PROMETHEUS_URL=""
 FORCE_FULL_INSTALL=false
-INSTALL_PERM_TIMER=false
+INSTALL_PERM_TIMER=true  # Enabled by default to ensure new logs are always readable
 
 # Platform detection
 IS_LINUX=false
@@ -208,7 +208,7 @@ show_usage() {
     echo "  -c, --config-url URL         Custom configuration file URL"
     echo "  -p, --prometheus-url URL     Prometheus endpoint URL"
     echo "  -f, --force                  Force full observability install (ignore virtualization detection)"
-    echo "  --install-perm-timer         Install systemd timer to auto-fix new log permissions"
+    echo "  --no-perm-timer              Disable automatic log permission fixer (enabled by default)"
     echo
     echo "Examples:"
     echo "  # Basic Linux installation (auto-detects system type):"
@@ -220,8 +220,8 @@ show_usage() {
     echo "  # With custom configuration URL:"
     echo "  sudo $0 --config-url 'https://example.com/custom-config.alloy'"
     echo
-    echo "  # Install with auto-permission fixer (for systems that add new logs frequently):"
-    echo "  sudo $0 --install-perm-timer --loki-url 'https://loki.example.com/loki/api/v1/push'"
+    echo "  # Disable auto-permission fixer (not recommended):"
+    echo "  sudo $0 --no-perm-timer --loki-url 'https://loki.example.com/loki/api/v1/push'"
     echo
     echo "Automatic configuration selection:"
     echo "  • Standalone Linux & Proxmox VE Host: aio-linux.alloy (logs + metrics)"
@@ -230,8 +230,8 @@ show_usage() {
     echo
     echo "Note: Proxmox host metrics are collected by Alloy directly. Guest metrics and prometheus-pve-exporter are not supported."
     echo
-    echo "Note: If new applications are installed after Alloy, their log files may need"
-    echo "      permission fixes. Use --install-perm-timer or run alloy_fix_permissions.sh"
+    echo "Note: The permission fixer timer is installed by default to ensure new log files"
+    echo "      are always readable. Use --no-perm-timer to disable if not needed."
     echo
     echo "Note: For Windows installation, use the PowerShell script:"
     echo "      alloy_setup_windows.ps1"
@@ -950,8 +950,8 @@ parse_args() {
                 FORCE_FULL_INSTALL=true
                 shift
                 ;;
-            --install-perm-timer)
-                INSTALL_PERM_TIMER=true
+            --no-perm-timer)
+                INSTALL_PERM_TIMER=false
                 shift
                 ;;
             *)
@@ -972,8 +972,8 @@ parse_args() {
     if [[ "$FORCE_FULL_INSTALL" == true ]]; then
         log "Force installation enabled: full observability will be configured regardless of virtualization"
     fi
-    if [[ "$INSTALL_PERM_TIMER" == true ]]; then
-        log "Will install permission fixer timer for automatic log permission management"
+    if [[ "$INSTALL_PERM_TIMER" == false ]]; then
+        log_warning "Permission fixer timer disabled - new log files may not be readable"
     fi
 }
 

@@ -136,6 +136,12 @@ sudo systemctl restart alloy
 
 **Permission denied for NEW log files (after Alloy installation):**
 
+> **Note:** As of the latest version, a permission fixer timer is installed **by default** during setup. This timer runs hourly and automatically fixes permissions for any new log files. If you're still seeing permission errors, run the fixer manually once:
+
+```bash
+sudo /usr/local/bin/alloy-fix-permissions
+```
+
 When you install new applications (like CrowdSec, fail2ban, etc.) after Alloy is already installed, their log files won't automatically have the correct permissions. You'll see errors like:
 ```
 failed to tail the file: open /var/log/crowdsec-firewall-bouncer.log: permission denied
@@ -149,7 +155,10 @@ sudo systemctl restart alloy
 
 **Fix all log files at once:**
 ```bash
-# Using the permission fixer script (included in this repo)
+# Using the permission fixer (installed by default at /usr/local/bin)
+sudo /usr/local/bin/alloy-fix-permissions
+
+# Or using the script from the repo
 sudo bash alloy_fix_permissions.sh
 
 # Or manually fix all logs
@@ -158,10 +167,10 @@ sudo setfacl -R -d -m u:alloy:rx /var/log/
 sudo systemctl restart alloy
 ```
 
-**Automatic fix (install systemd timer):**
+**Check timer status:**
 ```bash
-# Install timer that runs hourly to fix permissions automatically
-sudo bash alloy_fix_permissions.sh --install-timer
+# Verify the permission fixer timer is running
+sudo systemctl status alloy-fix-permissions.timer
 ```
 
 **Validate configuration:**
