@@ -135,12 +135,12 @@ fix_file_permissions() {
     fi
 
     if [[ "$DRY_RUN" == true ]]; then
-        [[ "$QUIET" != true ]] && log "[DRY-RUN] Would fix: $file"
+        [[ "$QUIET" != true ]] && log "[DRY-RUN] Would fix: $file" || true
         return 0
     fi
 
     if setfacl -m "u:${ALLOY_USER}:r" "$file" 2>/dev/null; then
-        [[ "$QUIET" != true ]] && log_success "Fixed permissions: $file"
+        [[ "$QUIET" != true ]] && log_success "Fixed permissions: $file" || true
         return 0
     else
         log_error "Failed to fix: $file"
@@ -163,7 +163,7 @@ fix_directory_permissions() {
     # Fix the directory itself
     if needs_permission_fix "$dir"; then
         if [[ "$DRY_RUN" == true ]]; then
-            [[ "$QUIET" != true ]] && log "[DRY-RUN] Would fix directory: $dir"
+            [[ "$QUIET" != true ]] && log "[DRY-RUN] Would fix directory: $dir" || true
         else
             if setfacl -m "u:${ALLOY_USER}:rx" "$dir" 2>/dev/null; then
                 [[ "$VERBOSE" == true ]] && log_success "Fixed directory: $dir"
@@ -220,7 +220,7 @@ fix_directory_permissions() {
         fi
     done < <(find "$dir" -print0 2>/dev/null)
 
-    [[ "$QUIET" != true ]] && log "Directory $dir: $fixed_count fixed, $failed_count failed"
+    [[ "$QUIET" != true ]] && log "Directory $dir: $fixed_count fixed, $failed_count failed" || true
 }
 
 # Install systemd timer for automatic permission fixing
@@ -357,8 +357,8 @@ main() {
         exit 0
     fi
 
-    [[ "$QUIET" != true ]] && log "Starting Alloy log permissions fixer..."
-    [[ "$DRY_RUN" == true && "$QUIET" != true ]] && log_warning "DRY RUN MODE - no changes will be made"
+    [[ "$QUIET" != true ]] && log "Starting Alloy log permissions fixer..." || true
+    [[ "$DRY_RUN" == true && "$QUIET" != true ]] && log_warning "DRY RUN MODE - no changes will be made" || true
 
     # Handle specific file
     if [[ -n "$SPECIFIC_FILE" ]]; then
@@ -372,14 +372,14 @@ main() {
     # Process all directories
     for dir in "${LOG_DIRS[@]}"; do
         if [[ -d "$dir" ]]; then
-            [[ "$QUIET" != true ]] && log "Processing directory: $dir"
+            [[ "$QUIET" != true ]] && log "Processing directory: $dir" || true
             fix_directory_permissions "$dir"
         else
             [[ "$VERBOSE" == true ]] && log_warning "Directory not found: $dir"
         fi
     done
 
-    [[ "$QUIET" != true ]] && log_success "Permission fix complete"
+    [[ "$QUIET" != true ]] && log_success "Permission fix complete" || true
 }
 
 main
