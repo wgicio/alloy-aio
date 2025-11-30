@@ -212,9 +212,9 @@ main() {
     if [[ -n "$VM_ID" ]]; then
         # Deploy to specific VM
         if deploy_to_vm "$VM_ID"; then
-            ((success_count++))
+            ((success_count++)) || true
         else
-            ((fail_count++))
+            ((fail_count++)) || true
         fi
     else
         # Deploy to all running VMs
@@ -234,9 +234,9 @@ main() {
         for vmid in $running_vms; do
             # Capture result without letting set -e exit the script
             if deploy_to_vm "$vmid"; then
-                ((success_count++))
+                ((success_count++)) || true
             else
-                ((fail_count++))
+                ((fail_count++)) || true
             fi
         done
     fi

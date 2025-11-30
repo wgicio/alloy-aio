@@ -195,9 +195,9 @@ main() {
     if [[ -n "$CONTAINER_ID" ]]; then
         # Deploy to specific container
         if deploy_to_container "$CONTAINER_ID"; then
-            ((success_count++))
+            ((success_count++)) || true
         else
-            ((fail_count++))
+            ((fail_count++)) || true
         fi
     else
         # Deploy to all running containers
@@ -217,9 +217,9 @@ main() {
         for container in $running_containers; do
             # Capture result without letting set -e exit the script
             if deploy_to_container "$container"; then
-                ((success_count++))
+                ((success_count++)) || true
             else
-                ((fail_count++))
+                ((fail_count++)) || true
             fi
         done
     fi
