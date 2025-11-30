@@ -178,20 +178,34 @@ check_container_compatibility() {
 # Setup OCI logging for incompatible containers
 setup_oci_logging() {
     local container=$1
-    local script_dir
+    local oci_script=""
     
-    # Find the OCI logging setup script
-    if [[ -f "$0" ]]; then
-        script_dir="$(dirname "$0")"
-    else
-        script_dir="."
-    fi
+    # Find the OCI logging setup script in multiple locations
+    local search_paths=(
+        "$(dirname "$0")/proxmox_oci_logging_setup.sh"
+        "./proxmox_oci_logging_setup.sh"
+        "/root/proxmox_oci_logging_setup.sh"
+        "/tmp/proxmox_oci_logging_setup.sh"
+    )
     
-    local oci_script="$script_dir/proxmox_oci_logging_setup.sh"
+    for path in "${search_paths[@]}"; do
+        if [[ -f "$path" ]]; then
+            oci_script="$path"
+            break
+        fi
+    done
     
-    if [[ ! -f "$oci_script" ]]; then
-        log_error "OCI logging setup script not found: $oci_script"
-        return 1
+    # If not found locally, try to download it
+    if [[ -z "$oci_script" ]]; then
+        log "Downloading OCI logging setup script..."
+        local tmp_script="/tmp/proxmox_oci_logging_setup.sh"
+        if curl -fsSL "https://raw.githubusercontent.com/IT-BAER/alloy-aio/main/proxmox_oci_logging_setup.sh" -o "$tmp_script"; then
+            chmod +x "$tmp_script"
+            oci_script="$tmp_script"
+        else
+            log_error "Failed to download OCI logging setup script"
+            return 1
+        fi
     fi
     
     log "Setting up OCI logging for CT $container..."
