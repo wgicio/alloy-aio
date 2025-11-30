@@ -185,12 +185,21 @@ sudo alloy fmt --test /etc/alloy/aio-linux.alloy
 
 ## 🖥️ Tested Systems
 
-| OS | Version | Logs | Metrics | Status |
-|---|---------|------|---------|---------|
-| Proxmox (Host)| 8.4.1 | ✅ | ✅ | ✅ |
-| Debian (Virtualized)| 12+ | ✅ | ❌ | ✅ |
-| Windows (Physical)| 10/11/Server 2022+ | ✅ | ✅ | ✅ |
-| Windows (Proxmox VM)| 10/11/Server 2022+ | ✅ | ❌ | ✅ |
+| OS Family | Distribution | Version | Logs | Metrics | Status |
+|-----------|--------------|---------|------|---------|--------|
+| **Proxmox** | Proxmox VE (Host) | 8.4.1 | ✅ | ✅ | ✅ |
+| **Debian** | Debian | 10+ | ✅ | ✅/❌¹ | ✅ |
+| **Debian** | Ubuntu | 18.04+ | ✅ | ✅/❌¹ | ✅ |
+| **RHEL** | RHEL/CentOS Stream | 8+ | ✅ | ✅/❌¹ | ✅ |
+| **RHEL** | Rocky Linux | 8+ | ✅ | ✅/❌¹ | ✅ |
+| **RHEL** | AlmaLinux | 8+ | ✅ | ✅/❌¹ | ✅ |
+| **RHEL** | Fedora | 36+ | ✅ | ✅/❌¹ | ✅ |
+| **SUSE** | openSUSE Leap | 15+ | ✅ | ✅/❌¹ | ✅ |
+| **SUSE** | SLES | 15+ | ✅ | ✅/❌¹ | ✅ |
+| **Windows** | Windows 10/11 | 10+ | ✅ | ✅/❌¹ | ✅ |
+| **Windows** | Windows Server | 2016+ | ✅ | ✅/❌¹ | ✅ |
+
+> ¹ Metrics disabled on virtualized systems (VMs/containers) due to kernel limitations. Use `--force` to override.
 
 <br>
 

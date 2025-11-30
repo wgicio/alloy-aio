@@ -12,8 +12,11 @@
 #
 # Note: Proxmox host metrics are collected by Alloy directly. Guest metrics are collected via pve-guest-exporter Service.
 #
-# Compatible with:
-#   - Linux: Debian 10+, Ubuntu 18.04+
+# Compatible with (matching official Grafana Alloy support):
+#   - Debian 10+ / Ubuntu 18.04+ (apt)
+#   - RHEL 8+ / CentOS Stream 8+ / Rocky Linux 8+ / AlmaLinux 8+ / Oracle Linux 8+ / Fedora 36+ (dnf/yum)
+#   - openSUSE Leap 15+ / SLES 15+ (zypper)
+#
 # Requirements: sudo access, internet connection
 #
 # Configuration files:
@@ -25,9 +28,9 @@
 
 set -euo pipefail  # Exit on error, undefined vars, pipe failures
 
-# Set non-interactive mode to prevent prompts
-export DEBIAN_FRONTEND=noninteractive
-export NEEDRESTART_MODE=a
+# Package manager detection (set by check_system)
+PKG_MANAGER=""  # apt, dnf, yum, or zypper
+PKG_FAMILY=""   # debian, rhel, or suse
 export NEEDRESTART_SUSPEND=1
 
 # Colors for output
@@ -276,18 +279,68 @@ check_system() {
     if [[ -f /etc/os-release ]]; then
         IS_LINUX=true
         source /etc/os-release
+        
+        # Detect package manager family based on distro ID
         case "$ID" in
-            "debian"|"ubuntu")
-                :
+            # Debian family (apt)
+            "debian"|"ubuntu"|"linuxmint"|"pop"|"elementary"|"zorin"|"kali"|"parrot"|"raspbian")
+                PKG_FAMILY="debian"
+                PKG_MANAGER="apt"
+                # Set non-interactive mode for Debian-based
+                export DEBIAN_FRONTEND=noninteractive
+                export NEEDRESTART_MODE=a
                 ;;
+            # RHEL family (dnf/yum)
+            "rhel"|"centos"|"rocky"|"almalinux"|"ol"|"fedora"|"amzn"|"scientific")
+                PKG_FAMILY="rhel"
+                # Prefer dnf over yum if available
+                if command -v dnf &>/dev/null; then
+                    PKG_MANAGER="dnf"
+                elif command -v yum &>/dev/null; then
+                    PKG_MANAGER="yum"
+                else
+                    log_error "Neither dnf nor yum found on RHEL-based system"
+                    exit 1
+                fi
+                ;;
+            # SUSE family (zypper)
+            "opensuse-leap"|"opensuse-tumbleweed"|"opensuse"|"sles"|"sled")
+                PKG_FAMILY="suse"
+                PKG_MANAGER="zypper"
+                ;;
+            # Check ID_LIKE for derivatives
             *)
-                log_error "Unsupported Linux OS: $PRETTY_NAME. This script supports Debian and Ubuntu only."
-                exit 1
+                # Try to detect from ID_LIKE (for derivatives like Pop!_OS, Linux Mint, etc.)
+                if [[ "${ID_LIKE:-}" =~ "debian" ]] || [[ "${ID_LIKE:-}" =~ "ubuntu" ]]; then
+                    PKG_FAMILY="debian"
+                    PKG_MANAGER="apt"
+                    export DEBIAN_FRONTEND=noninteractive
+                    export NEEDRESTART_MODE=a
+                elif [[ "${ID_LIKE:-}" =~ "rhel" ]] || [[ "${ID_LIKE:-}" =~ "fedora" ]] || [[ "${ID_LIKE:-}" =~ "centos" ]]; then
+                    PKG_FAMILY="rhel"
+                    if command -v dnf &>/dev/null; then
+                        PKG_MANAGER="dnf"
+                    elif command -v yum &>/dev/null; then
+                        PKG_MANAGER="yum"
+                    else
+                        log_error "Neither dnf nor yum found on RHEL-based system"
+                        exit 1
+                    fi
+                elif [[ "${ID_LIKE:-}" =~ "suse" ]]; then
+                    PKG_FAMILY="suse"
+                    PKG_MANAGER="zypper"
+                else
+                    log_error "Unsupported Linux distribution: $PRETTY_NAME"
+                    log_error "Supported: Debian/Ubuntu, RHEL/CentOS/Fedora/Rocky/Alma, openSUSE/SLES"
+                    exit 1
+                fi
                 ;;
         esac
+        
+        log "Detected: $PRETTY_NAME (package manager: $PKG_MANAGER)"
     else
         log_error "Cannot determine OS or unsupported system."
-        log_error "This script only supports Debian and Ubuntu Linux systems."
+        log_error "This script requires /etc/os-release to detect the Linux distribution."
         exit 1
     fi
 }
@@ -330,50 +383,112 @@ detect_proxmox() {
 
 # Update package lists
 update_packages() {
-    # Only run update if it hasn't been run recently (in the last hour)
-    local apt_lists="/var/lib/apt/lists"
-    if [[ -d "$apt_lists" ]]; then
-        local last_update=$(stat -c %Y "$apt_lists" 2>/dev/null || echo 0)
-        local current_time=$(date +%s)
-        local time_diff=$((current_time - last_update))
-        
-        # If lists are older than 1 hour (3600 seconds), update them
-        if [[ $time_diff -gt 3600 ]]; then
-            run_with_spinner "DEBIAN_FRONTEND=noninteractive apt-get update -qq > /dev/null 2>&1" "Updating package lists..." || error_exit "Failed to update package lists"
-            log_success "Package lists updated"
-        else
-            log "Package lists are recent, skipping update"
-        fi
-    else
-        run_with_spinner "DEBIAN_FRONTEND=noninteractive apt-get update -qq > /dev/null 2>&1" "Updating package lists..." || error_exit "Failed to update package lists"
-        log_success "Package lists updated"
-    fi
+    case "$PKG_MANAGER" in
+        "apt")
+            # Only run update if it hasn't been run recently (in the last hour)
+            local apt_lists="/var/lib/apt/lists"
+            if [[ -d "$apt_lists" ]]; then
+                local last_update=$(stat -c %Y "$apt_lists" 2>/dev/null || echo 0)
+                local current_time=$(date +%s)
+                local time_diff=$((current_time - last_update))
+                
+                # If lists are older than 1 hour (3600 seconds), update them
+                if [[ $time_diff -gt 3600 ]]; then
+                    run_with_spinner "DEBIAN_FRONTEND=noninteractive apt-get update -qq > /dev/null 2>&1" "Updating package lists..." || error_exit "Failed to update package lists"
+                    log_success "Package lists updated"
+                else
+                    log "Package lists are recent, skipping update"
+                fi
+            else
+                run_with_spinner "DEBIAN_FRONTEND=noninteractive apt-get update -qq > /dev/null 2>&1" "Updating package lists..." || error_exit "Failed to update package lists"
+                log_success "Package lists updated"
+            fi
+            ;;
+        "dnf")
+            run_with_spinner "dnf makecache -q > /dev/null 2>&1" "Refreshing package cache..." || error_exit "Failed to refresh package cache"
+            log_success "Package cache refreshed"
+            ;;
+        "yum")
+            run_with_spinner "yum makecache -q > /dev/null 2>&1" "Refreshing package cache..." || error_exit "Failed to refresh package cache"
+            log_success "Package cache refreshed"
+            ;;
+        "zypper")
+            run_with_spinner "zypper --non-interactive refresh > /dev/null 2>&1" "Refreshing package cache..." || error_exit "Failed to refresh package cache"
+            log_success "Package cache refreshed"
+            ;;
+    esac
 }
 
 
+# Install a package using the detected package manager
+install_package() {
+    local pkg_name="$1"
+    local display_name="${2:-$pkg_name}"
+    
+    case "$PKG_MANAGER" in
+        "apt")
+            if dpkg-query -W -f='${Status}' "$pkg_name" 2>/dev/null | grep -q "install ok installed"; then
+                log_success "$display_name is already installed"
+                return 0
+            fi
+            run_with_spinner "DEBIAN_FRONTEND=noninteractive apt-get install -y -o Dpkg::Options::='--force-confdef' -o Dpkg::Options::='--force-confold' $pkg_name > /dev/null 2>&1" "Installing $display_name..." || error_exit "Failed to install $display_name"
+            ;;
+        "dnf")
+            if rpm -q "$pkg_name" &>/dev/null; then
+                log_success "$display_name is already installed"
+                return 0
+            fi
+            run_with_spinner "dnf install -y -q $pkg_name > /dev/null 2>&1" "Installing $display_name..." || error_exit "Failed to install $display_name"
+            ;;
+        "yum")
+            if rpm -q "$pkg_name" &>/dev/null; then
+                log_success "$display_name is already installed"
+                return 0
+            fi
+            run_with_spinner "yum install -y -q $pkg_name > /dev/null 2>&1" "Installing $display_name..." || error_exit "Failed to install $display_name"
+            ;;
+        "zypper")
+            if rpm -q "$pkg_name" &>/dev/null; then
+                log_success "$display_name is already installed"
+                return 0
+            fi
+            run_with_spinner "zypper --non-interactive install -y $pkg_name > /dev/null 2>&1" "Installing $display_name..." || error_exit "Failed to install $display_name"
+            ;;
+    esac
+    log_success "$display_name installed successfully"
+}
+
 # Install prerequisites
 install_prerequisites() {
-    # Only install essential system packages for Python and system utilities
-    # Application dependencies (flask, requests, gunicorn) are installed in the virtualenv below
+    # Package names vary by distro family
+    local packages_base=()
+    local packages_python=()
+    
+    case "$PKG_FAMILY" in
+        "debian")
+            packages_base=("gnupg" "wget" "systemd" "acl")
+            packages_python=("python3" "python3-venv")
+            ;;
+        "rhel")
+            packages_base=("gnupg2" "wget" "systemd" "acl")
+            packages_python=("python3" "python3-pip")
+            ;;
+        "suse")
+            packages_base=("gpg2" "wget" "systemd" "acl")
+            packages_python=("python3" "python3-pip")
+            ;;
+    esac
+    
     # Skip Python/venv/exporter dependencies for virtualized/container systems (logs only)
     if [[ "$SYSTEM_TYPE" == "proxmox-container" || "$SYSTEM_TYPE" == "proxmox-vm" ]]; then
-        local user_packages=("gpg" "wget" "systemd" "acl")
-        local dpkg_packages=("gnupg" "wget" "systemd" "acl")
+        for pkg in "${packages_base[@]}"; do
+            install_package "$pkg"
+        done
     else
-        local user_packages=("gpg" "wget" "systemd" "acl" "python3" "python3-venv")
-        local dpkg_packages=("gnupg" "wget" "systemd" "acl" "python3" "python3-venv")
+        for pkg in "${packages_base[@]}" "${packages_python[@]}"; do
+            install_package "$pkg"
+        done
     fi
-    local n=${#user_packages[@]}
-    for ((i=0; i<n; i++)); do
-        local user_name="${user_packages[$i]}"
-        local dpkg_name="${dpkg_packages[$i]}"
-        if dpkg-query -W -f='${Status}' $dpkg_name 2>/dev/null | grep -q "install ok installed"; then
-            log_success "$user_name is already installed"
-        else
-            run_with_spinner "DEBIAN_FRONTEND=noninteractive apt-get install -y -o Dpkg::Options::=\"--force-confdef\" -o Dpkg::Options::=\"--force-confold\" $dpkg_name > /dev/null 2>&1" "Installing $user_name..." || error_exit "Failed to install $user_name"
-            log_success "$user_name installed successfully"
-        fi
-    done
 
     # For Proxmox hosts only, create a virtualenv for the exporter and install dependencies with pip
     if [[ "$SYSTEM_TYPE" == "proxmox-host" ]]; then
@@ -394,33 +509,85 @@ install_prerequisites() {
 setup_grafana_repo() {
     log "Setting up Grafana repository..."
     
-    # Create keyrings directory
-    mkdir -p /etc/apt/keyrings/ || error_exit "Failed to create keyrings directory"
+    case "$PKG_FAMILY" in
+        "debian")
+            # Create keyrings directory
+            mkdir -p /etc/apt/keyrings/ || error_exit "Failed to create keyrings directory"
+            
+            # Download and install GPG key
+            log "Downloading Grafana GPG key..."
+            if ! wget -q -O - "$GRAFANA_GPG_KEY_URL" | gpg --dearmor | tee /etc/apt/keyrings/grafana.gpg > /dev/null; then
+                error_exit "Failed to download or install Grafana GPG key"
+            fi
+            
+            # Add repository
+            log "Adding Grafana APT repository..."
+            echo "deb [signed-by=/etc/apt/keyrings/grafana.gpg] $GRAFANA_REPO_URL stable main" | tee /etc/apt/sources.list.d/grafana.list > /dev/null || error_exit "Failed to add Grafana repository"
+            ;;
+        "rhel")
+            # Create repo file for RHEL/Fedora
+            log "Adding Grafana RPM repository..."
+            cat > /etc/yum.repos.d/grafana.repo << 'EOF'
+[grafana]
+name=grafana
+baseurl=https://rpm.grafana.com
+repo_gpgcheck=1
+enabled=1
+gpgcheck=1
+gpgkey=https://rpm.grafana.com/gpg.key
+sslverify=1
+sslcacert=/etc/pki/tls/certs/ca-bundle.crt
+EOF
+            ;;
+        "suse")
+            # Add repository for SUSE
+            log "Adding Grafana Zypper repository..."
+            run_with_spinner "zypper --non-interactive addrepo https://rpm.grafana.com grafana > /dev/null 2>&1 || true" "Adding Grafana repository..."
+            # Import GPG key
+            run_with_spinner "rpm --import https://rpm.grafana.com/gpg.key > /dev/null 2>&1" "Importing Grafana GPG key..." || error_exit "Failed to import GPG key"
+            ;;
+    esac
     
-    # Download and install GPG key
-    log "Downloading Grafana GPG key..."
-    if ! wget -q -O - "$GRAFANA_GPG_KEY_URL" | gpg --dearmor | tee /etc/apt/keyrings/grafana.gpg > /dev/null; then
-        error_exit "Failed to download or install Grafana GPG key"
-    fi
-    
-    # Add repository
-    log "Adding Grafana repository..."
-    echo "deb [signed-by=/etc/apt/keyrings/grafana.gpg] $GRAFANA_REPO_URL stable main" | tee /etc/apt/sources.list.d/grafana.list > /dev/null || error_exit "Failed to add Grafana repository"
-    
-    # Update package lists with new repository (single update after all repos are configured)
-    log "Updating package lists after all repositories are configured..."
-    run_with_spinner "DEBIAN_FRONTEND=noninteractive apt-get update -qq > /dev/null 2>&1" "Updating package lists..." || error_exit "Failed to update package lists after adding Grafana repository"
+    # Update package lists with new repository
+    log "Updating package lists after repository configuration..."
+    update_packages
     log_success "Grafana repository configured and package lists updated"
 }
 
 # Install Grafana Alloy
 install_alloy() {
     log "Installing Grafana Alloy on Linux..."
-    if run_with_spinner "DEBIAN_FRONTEND=noninteractive apt-get install -y -o Dpkg::Options::=\"--force-confdef\" -o Dpkg::Options::=\"--force-confold\" alloy > /dev/null 2>&1" "Installing Grafana Alloy..."; then
-        log_success "Grafana Alloy installed successfully"
-    else
-        error_exit "Failed to install Grafana Alloy"
-    fi
+    
+    case "$PKG_MANAGER" in
+        "apt")
+            if run_with_spinner "DEBIAN_FRONTEND=noninteractive apt-get install -y -o Dpkg::Options::='--force-confdef' -o Dpkg::Options::='--force-confold' alloy > /dev/null 2>&1" "Installing Grafana Alloy..."; then
+                log_success "Grafana Alloy installed successfully"
+            else
+                error_exit "Failed to install Grafana Alloy"
+            fi
+            ;;
+        "dnf")
+            if run_with_spinner "dnf install -y alloy > /dev/null 2>&1" "Installing Grafana Alloy..."; then
+                log_success "Grafana Alloy installed successfully"
+            else
+                error_exit "Failed to install Grafana Alloy"
+            fi
+            ;;
+        "yum")
+            if run_with_spinner "yum install -y alloy > /dev/null 2>&1" "Installing Grafana Alloy..."; then
+                log_success "Grafana Alloy installed successfully"
+            else
+                error_exit "Failed to install Grafana Alloy"
+            fi
+            ;;
+        "zypper")
+            if run_with_spinner "zypper --non-interactive install -y alloy > /dev/null 2>&1" "Installing Grafana Alloy..."; then
+                log_success "Grafana Alloy installed successfully"
+            else
+                error_exit "Failed to install Grafana Alloy"
+            fi
+            ;;
+    esac
     
     # Verify installation
     if command -v alloy &> /dev/null; then

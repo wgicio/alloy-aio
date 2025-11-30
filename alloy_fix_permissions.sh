@@ -111,14 +111,20 @@ check_prerequisites() {
     # Check if setfacl is available
     if ! command -v setfacl &>/dev/null; then
         log_error "setfacl command not found"
-        log_error "Install ACL package: apt-get install acl"
+        log_error "Install ACL package:"
+        log_error "  Debian/Ubuntu: apt-get install acl"
+        log_error "  RHEL/Fedora:   dnf install acl"
+        log_error "  openSUSE:      zypper install acl"
         exit 1
     fi
 
     # Check if getfacl is available
     if ! command -v getfacl &>/dev/null; then
         log_error "getfacl command not found"
-        log_error "Install ACL package: apt-get install acl"
+        log_error "Install ACL package:"
+        log_error "  Debian/Ubuntu: apt-get install acl"
+        log_error "  RHEL/Fedora:   dnf install acl"
+        log_error "  openSUSE:      zypper install acl"
         exit 1
     fi
 }
