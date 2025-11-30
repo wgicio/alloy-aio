@@ -382,26 +382,36 @@ detect_proxmox() {
 }
 
 # Update package lists
+# Usage: update_packages [--force]
+# --force: Skip cache age check and always refresh (required after adding new repos)
 update_packages() {
+    local force=false
+    [[ "${1:-}" == "--force" ]] && force=true
+    
     case "$PKG_MANAGER" in
         "apt")
-            # Only run update if it hasn't been run recently (in the last hour)
-            local apt_lists="/var/lib/apt/lists"
-            if [[ -d "$apt_lists" ]]; then
-                local last_update=$(stat -c %Y "$apt_lists" 2>/dev/null || echo 0)
-                local current_time=$(date +%s)
-                local time_diff=$((current_time - last_update))
-                
-                # If lists are older than 1 hour (3600 seconds), update them
-                if [[ $time_diff -gt 3600 ]]; then
-                    run_with_spinner "DEBIAN_FRONTEND=noninteractive apt-get update -qq > /dev/null 2>&1" "Updating package lists..." || error_exit "Failed to update package lists"
-                    log_success "Package lists updated"
-                else
-                    log "Package lists are recent, skipping update"
-                fi
-            else
+            # Only run update if it hasn't been run recently (in the last hour), unless forced
+            if [[ "$force" == true ]]; then
                 run_with_spinner "DEBIAN_FRONTEND=noninteractive apt-get update -qq > /dev/null 2>&1" "Updating package lists..." || error_exit "Failed to update package lists"
                 log_success "Package lists updated"
+            else
+                local apt_lists="/var/lib/apt/lists"
+                if [[ -d "$apt_lists" ]]; then
+                    local last_update=$(stat -c %Y "$apt_lists" 2>/dev/null || echo 0)
+                    local current_time=$(date +%s)
+                    local time_diff=$((current_time - last_update))
+                    
+                    # If lists are older than 1 hour (3600 seconds), update them
+                    if [[ $time_diff -gt 3600 ]]; then
+                        run_with_spinner "DEBIAN_FRONTEND=noninteractive apt-get update -qq > /dev/null 2>&1" "Updating package lists..." || error_exit "Failed to update package lists"
+                        log_success "Package lists updated"
+                    else
+                        log "Package lists are recent, skipping update"
+                    fi
+                else
+                    run_with_spinner "DEBIAN_FRONTEND=noninteractive apt-get update -qq > /dev/null 2>&1" "Updating package lists..." || error_exit "Failed to update package lists"
+                    log_success "Package lists updated"
+                fi
             fi
             ;;
         "dnf")
@@ -548,9 +558,9 @@ EOF
             ;;
     esac
     
-    # Update package lists with new repository
+    # Update package lists with new repository (force update since we just added a new repo)
     log "Updating package lists after repository configuration..."
-    update_packages
+    update_packages --force
     log_success "Grafana repository configured and package lists updated"
 }
 
