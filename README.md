@@ -79,6 +79,8 @@ bash -c "$(curl -fsSL https://raw.githubusercontent.com/IT-BAER/alloy-aio/main/p
 bash -c "$(curl -fsSL https://raw.githubusercontent.com/IT-BAER/alloy-aio/main/proxmox_ct_deploy.sh)" -- --loki-url "https://loki.yourdomain.com/loki/api/v1/push" --container 100
 ```
 
+> **📦 OCI Container Support:** Proxmox OCI containers (Docker images converted to LXC) are automatically detected. System containers with systemd are supported; Alpine Linux and application containers (no init system) are auto-skipped with a warning. See [OCI Container Logging](#-oci-container-logging) for how to collect logs from these containers.
+
 ### 🤖 Proxmox VM Mass Deployment
 > **Note:** Requires QEMU Guest Agent on target VMs.
 
@@ -90,6 +92,53 @@ bash -c "$(curl -fsSL https://raw.githubusercontent.com/IT-BAER/alloy-aio/main/p
 # Deploy to specific VM (replace Loki URL & VM ID)
 bash -c "$(curl -fsSL https://raw.githubusercontent.com/IT-BAER/alloy-aio/main/proxmox_vm_deploy.sh)" -- --loki-url "https://loki.yourdomain.com/loki/api/v1/push" --vm 100
 ```
+
+### 📦 OCI Container Logging
+
+> **For Docker/OCI containers on Proxmox** that cannot run Alloy directly (Alpine, nginx, Redis, etc.)
+
+OCI containers (Docker images running on Proxmox LXC) don't have systemd, so Alloy cannot be installed inside them. Instead, logs are collected via the **host's journald**:
+
+**How it works:**
+1. Container's stdout/stderr is redirected to syslog via a wrapper script
+2. Syslog socket is bind-mounted from host into container (`/dev/log`)
+3. Logs appear in host journald with custom tags (e.g., `ct122_nginx`)
+4. Host Alloy collects logs via journald integration
+
+**Automatic setup during mass deployment:**
+```bash
+# Deploy Alloy + setup OCI logging for incompatible containers
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/IT-BAER/alloy-aio/main/proxmox_ct_deploy.sh)" -- --loki-url "https://loki.yourdomain.com/loki/api/v1/push" --setup-oci
+```
+
+**Manual setup for specific OCI container:**
+```bash
+# Setup logging for a single OCI container
+sudo bash proxmox_oci_logging_setup.sh --container 122
+
+# Setup logging for all OCI containers
+sudo bash proxmox_oci_logging_setup.sh --all
+
+# List OCI containers that need logging setup
+sudo bash proxmox_oci_logging_setup.sh --list
+
+# Custom log tag (default: ct<ID>_<app>)
+sudo bash proxmox_oci_logging_setup.sh --container 122 --tag "my-nginx"
+
+# Revert changes (remove logging setup)
+sudo bash proxmox_oci_logging_setup.sh --container 122 --revert
+```
+
+**After setup, logs appear in host journald:**
+```bash
+# View logs from OCI container
+journalctl -t ct122_nginx -f
+
+# All OCI container logs
+journalctl | grep "ct[0-9]*_"
+```
+
+> **Note:** The Proxmox host must have Alloy installed to forward these logs to Loki.
 <br>
 
 ## 🛠️ Management
@@ -200,6 +249,17 @@ sudo alloy fmt --test /etc/alloy/aio-linux.alloy
 | **Windows** | Windows Server | 2016+ | ✅ | ✅/❌¹ | ✅ |
 
 > ¹ Metrics disabled on virtualized systems (VMs/containers) due to kernel limitations. Use `--force` to override.
+
+### ⚠️ Unsupported Systems
+
+| System | Reason | Alternative |
+|--------|--------|-------------|
+| **Alpine Linux** | Uses OpenRC instead of systemd | Use [OCI Container Logging](#-oci-container-logging) |
+| **Docker/OCI App Containers** | No init system (single-process) | Use [OCI Container Logging](#-oci-container-logging) |
+| **Devuan** | Uses sysvinit/OpenRC instead of systemd | - |
+| **Gentoo (OpenRC)** | OpenRC variant not supported | - |
+
+> **Note:** Proxmox mass deployment scripts automatically detect and skip unsupported containers. Use `--setup-oci` to configure logging for OCI containers.
 
 <br>
 
