@@ -111,7 +111,7 @@ deploy_to_container() {
     # Check if container is running
     if ! pct status $container | grep -q "running"; then
         log_warning "Container $container is not running, skipping..."
-        return 0
+        return 0  # Not a failure, just skipped
     fi
     
     # Clean up any existing directory in the container
@@ -188,9 +188,17 @@ main() {
         cd ..
     fi
     
+    local success_count=0
+    local fail_count=0
+    local skipped_count=0
+    
     if [[ -n "$CONTAINER_ID" ]]; then
         # Deploy to specific container
-        deploy_to_container "$CONTAINER_ID"
+        if deploy_to_container "$CONTAINER_ID"; then
+            ((success_count++))
+        else
+            ((fail_count++))
+        fi
     else
         # Deploy to all running containers
         log "Deploying to all running containers..."
@@ -205,12 +213,29 @@ main() {
         
         log "Found running containers: $running_containers"
         
-        # Deploy to each container
+        # Deploy to each container (continue on failure)
         for container in $running_containers; do
-            deploy_to_container "$container"
+            # Capture result without letting set -e exit the script
+            if deploy_to_container "$container"; then
+                ((success_count++))
+            else
+                ((fail_count++))
+            fi
         done
-        
-        log_success "Deployment to all containers completed"
+    fi
+    
+    # Summary report
+    echo
+    log "============================================="
+    log "Deployment Summary"
+    log "============================================="
+    log_success "Successful: $success_count"
+    [[ $fail_count -gt 0 ]] && log_error "Failed: $fail_count"
+    [[ $skipped_count -gt 0 ]] && log_warning "Skipped: $skipped_count"
+    
+    # Exit with error if any failures occurred
+    if [[ $fail_count -gt 0 ]]; then
+        exit 1
     fi
 }
 

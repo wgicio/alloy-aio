@@ -205,9 +205,17 @@ main() {
     check_root
     check_qm
     
+    local success_count=0
+    local fail_count=0
+    local skipped_count=0
+    
     if [[ -n "$VM_ID" ]]; then
         # Deploy to specific VM
-        deploy_to_vm "$VM_ID"
+        if deploy_to_vm "$VM_ID"; then
+            ((success_count++))
+        else
+            ((fail_count++))
+        fi
     else
         # Deploy to all running VMs
         log "Deploying to all running VMs..."
@@ -222,12 +230,29 @@ main() {
         
         log "Found running VMs: $running_vms"
         
-        # Deploy to each VM
+        # Deploy to each VM (continue on failure)
         for vmid in $running_vms; do
-            deploy_to_vm "$vmid"
+            # Capture result without letting set -e exit the script
+            if deploy_to_vm "$vmid"; then
+                ((success_count++))
+            else
+                ((fail_count++))
+            fi
         done
-        
-        log_success "Deployment to all VMs completed"
+    fi
+    
+    # Summary report
+    echo
+    log "============================================="
+    log "Deployment Summary"
+    log "============================================="
+    log_success "Successful: $success_count"
+    [[ $fail_count -gt 0 ]] && log_error "Failed: $fail_count"
+    [[ $skipped_count -gt 0 ]] && log_warning "Skipped: $skipped_count"
+    
+    # Exit with error if any failures occurred
+    if [[ $fail_count -gt 0 ]]; then
+        exit 1
     fi
 }
 
