@@ -43,6 +43,20 @@ DRY_RUN=false
 QUIET=false
 SYSTEMD_TIMER=false
 
+# Security: Files to exclude from permission changes (contain sensitive auth data)
+# These files have restricted permissions by design and should not be readable by services
+EXCLUDE_FILES=(
+    "btmp"           # Failed login attempts (binary)
+    "wtmp"           # Login records (binary)
+    "lastlog"        # Last login info (binary)
+    "tallylog"       # PAM tally data
+    "faillog"        # Failed login data
+    "sudo.log"       # Sudo command history
+    "sudoers"        # Sudo configuration
+    "shadow"         # Should never be in /var/log but exclude anyway
+    "gshadow"        # Should never be in /var/log but exclude anyway
+)
+
 # Show usage information
 show_usage() {
     echo "============================================="
@@ -109,9 +123,29 @@ check_prerequisites() {
     fi
 }
 
+# Check if file should be excluded for security reasons
+is_excluded_file() {
+    local file="$1"
+    local basename
+    basename=$(basename "$file")
+    
+    for excluded in "${EXCLUDE_FILES[@]}"; do
+        if [[ "$basename" == "$excluded" ]]; then
+            return 0  # Is excluded
+        fi
+    done
+    return 1  # Not excluded
+}
+
 # Check if file/directory needs permission fix
 needs_permission_fix() {
     local path="$1"
+    
+    # Security check: skip excluded sensitive files
+    if [[ -f "$path" ]] && is_excluded_file "$path"; then
+        [[ "$VERBOSE" == true ]] && log_warning "Skipping sensitive file: $path"
+        return 1  # Skip - security exclusion
+    fi
     
     # Check if alloy user already has read access via ACL
     if getfacl -p "$path" 2>/dev/null | grep -q "^user:${ALLOY_USER}:r"; then
@@ -236,7 +270,7 @@ install_systemd_timer() {
     chmod 755 "$script_path"
     log_success "Installed script to $script_path"
 
-    # Create systemd service unit
+    # Create systemd service unit with security hardening
     cat > "$service_path" << 'EOF'
 [Unit]
 Description=Fix log file permissions for Grafana Alloy
@@ -247,6 +281,17 @@ After=network.target
 Type=oneshot
 ExecStart=/usr/local/bin/alloy-fix-permissions --quiet
 User=root
+
+# Security hardening - limit what the service can do
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+NoNewPrivileges=false
+CapabilityBoundingSet=CAP_FOWNER CAP_DAC_OVERRIDE
+# Allow write only to /var/log for ACL modifications
+ReadWritePaths=/var/log
+# Restrict network access (not needed for this service)
+PrivateNetwork=true
 
 [Install]
 WantedBy=multi-user.target

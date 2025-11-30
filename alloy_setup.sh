@@ -519,7 +519,7 @@ install_permission_fixer_timer() {
     
     chmod 755 "$script_path"
     
-    # Create systemd service unit
+    # Create systemd service unit with security hardening
     cat > "$service_path" << 'EOF'
 [Unit]
 Description=Fix log file permissions for Grafana Alloy
@@ -530,6 +530,17 @@ After=network.target
 Type=oneshot
 ExecStart=/usr/local/bin/alloy-fix-permissions --quiet
 User=root
+
+# Security hardening - limit what the service can do
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+NoNewPrivileges=false
+CapabilityBoundingSet=CAP_FOWNER CAP_DAC_OVERRIDE
+# Allow write only to /var/log for ACL modifications
+ReadWritePaths=/var/log
+# Restrict network access (not needed for this service)
+PrivateNetwork=true
 
 [Install]
 WantedBy=multi-user.target
