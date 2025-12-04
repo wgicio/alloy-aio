@@ -108,7 +108,8 @@ run_with_spinner() {
     local cmd="$1"
     local msg="$2"
     local pid spinner delay spinstr status
-    local tmpfile=$(mktemp)
+    local tmpfile
+    tmpfile=$(mktemp) || { echo "Failed to create temp file" >&2; return 1; }
     
     eval "$cmd" > "$tmpfile" 2>&1 &
     pid=$!
