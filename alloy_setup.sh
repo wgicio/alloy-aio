@@ -108,7 +108,9 @@ run_with_spinner() {
     local cmd="$1"
     local msg="$2"
     local pid spinner delay spinstr status
-    eval "$cmd" &
+    local tmpfile=$(mktemp)
+    
+    eval "$cmd" > "$tmpfile" 2>&1 &
     pid=$!
     spinner=("|" "/" "-" "\\")
     delay=0.1
@@ -116,7 +118,7 @@ run_with_spinner() {
     tput civis 2>/dev/null || true
     printed=0
     while kill -0 $pid 2>/dev/null; do
-        printf "\r${BLUE}[INFO]${NC} $msg %s" "${spinner[$i]}"
+        printf "\r${BLUE}[INFO]${NC} $msg %s" "${spinner[$i]}" >&2
         i=$(( (i+1) % 4 ))
         sleep $delay
         printed=1
@@ -125,10 +127,13 @@ run_with_spinner() {
     status=$?
     # If the command was too fast, print at least one [INFO] line
     if [[ $printed -eq 0 ]]; then
-        printf "\r${BLUE}[INFO]${NC} $msg ..."
+        printf "\r${BLUE}[INFO]${NC} $msg ..." >&2
     fi
-    printf "\r${BLUE}[INFO]${NC} $msg    \n"
+    printf "\r${BLUE}[INFO]${NC} $msg    \n" >&2
     tput cnorm 2>/dev/null || true
+    
+    cat "$tmpfile"
+    rm -f "$tmpfile"
     return $status
 }
 
