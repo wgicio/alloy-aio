@@ -1231,21 +1231,21 @@ setup_proxmox_exporter_user_and_token() {
         log_success "Existing token deleted"
     fi
 
-    token_output=$(run_with_spinner "pveum user token add \"$pve_user\" \"$token_id\" --privsep 0 2>&1" "Creating API token for $pve_user..." || echo "ERROR")
+    token_output=$(run_with_spinner "pveum user token add \"$pve_user\" \"$token_id\" --privsep 0" "Creating API token for $pve_user..." || true)
     # Try to extract the token value from the Proxmox table output
     token_value=""
-    value_line=$(echo "$token_output" | grep -E '^[│|][[:space:]]*value[[:space:]]*[│|]')
+    value_line=$(echo "$token_output" | grep -E '^[│|][[:space:]]*value[[:space:]]*[│|]' || true)
     if [[ -n "$value_line" ]]; then
         # Extract the value between the second and third pipe, trim whitespace
         token_value=$(echo "$value_line" | awk -F'[│|]' '{gsub(/^ +| +$/,"",$3); print $3}')
     fi
     # Fallback: Try to extract a JWT (three dot-separated segments)
     if [[ -z "$token_value" ]]; then
-        token_value=$(echo "$token_output" | grep -Eo '([A-Za-z0-9\-\._=]+\.[A-Za-z0-9\-\._=]+\.[A-Za-z0-9\-\._=]+)' | head -n1)
+        token_value=$(echo "$token_output" | grep -Eo '([A-Za-z0-9\-\._=]+\.[A-Za-z0-9\-\._=]+\.[A-Za-z0-9\-\._=]+)' | head -n1 || true)
     fi
     # Fallback: Try to extract a UUID
     if [[ -z "$token_value" ]]; then
-        token_value=$(echo "$token_output" | grep -Eo '([a-f0-9\-]{36})' | head -n1)
+        token_value=$(echo "$token_output" | grep -Eo '([a-f0-9\-]{36})' | head -n1 || true)
     fi
     if [[ -z "$token_value" ]]; then
         log_error "Failed to extract API token value for $pve_user!$token_id. Full output:"
