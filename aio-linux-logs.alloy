@@ -136,23 +136,42 @@ loki.process "filter_journal" {
   stage.regex {
     expression = "msg=\"(?P<msg>[^\"]*)\""
   }
-  
-  // Add process and message as labels for easy searching
+
+  // Extract level from logfmt-style logs (e.g., level=error, level=info)
+  stage.regex {
+    expression = "(?i)level=(?P<content_level>emerg(?:ency)?|alert|crit(?:ical)?|err(?:or)?|warn(?:ing)?|notice|info|debug)"
+  }
+
+  // Normalize the extracted level to lowercase
+  stage.template {
+    source   = "detected_level"
+    template = "{{ if .content_level }}{{ .content_level | ToLower }}{{ else if .level }}{{ .level | ToLower }}{{ else }}unknown{{ end }}"
+  }
+
+  // Add process as label
   stage.labels {
     values = {
       process = "",
     }
   }
-  
+
+  // Overwrite level label with detected level from log content for correct Grafana display
+  stage.labels {
+    values = {
+      level = "detected_level",
+    }
+  }
+
   // Set message as the log content
   stage.output {
     source = "message"
   }
-  
-  // Add msg as structured metadata
+
+  // Add msg and detected_level as structured metadata
   stage.structured_metadata {
     values = {
-      msg = "msg",
+      msg            = "msg",
+      detected_level = "detected_level",
     }
   }
 }

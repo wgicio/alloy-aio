@@ -118,8 +118,10 @@ loki.process "windows_events" {
     }
   }
 
+  // Overwrite numeric level with text detected_level for correct Grafana display
   stage.labels {
     values = {
+      level          = "detected_level",
       detected_level = "detected_level",
     }
   }
