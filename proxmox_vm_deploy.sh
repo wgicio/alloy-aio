@@ -153,7 +153,7 @@ show_spinner() {
 deploy_to_windows_vm() {
     local vmid=$1
     
-    local deploy_cmd="Set-ExecutionPolicy Bypass -Scope Process -Force; \$ProgressPreference = 'SilentlyContinue'; [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; Remove-Item -Path 'C:\WINDOWS\TEMP\alloy-install' -Recurse -Force -ErrorAction SilentlyContinue; Remove-Item -Path 'C:\alloy_setup.ps1' -Force -ErrorAction SilentlyContinue; Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/IT-BAER/alloy-aio/main/alloy_setup_windows.ps1' -OutFile 'C:\alloy_setup.ps1'; & 'C:\alloy_setup.ps1' -LokiUrl '$LOKI_URL' -NonInteractive; Remove-Item -Path 'C:\alloy_setup.ps1' -Force -ErrorAction SilentlyContinue;"
+    local deploy_cmd="Set-ExecutionPolicy Bypass -Scope Process -Force; \$ProgressPreference = 'SilentlyContinue'; [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; Remove-Item -Path 'C:\WINDOWS\TEMP\alloy-install' -Recurse -Force -ErrorAction SilentlyContinue; Remove-Item -Path 'C:\alloy_setup.ps1' -Force -ErrorAction SilentlyContinue; Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/IT-BAER/alloy-aio/main/alloy_setup_windows.ps1' -OutFile 'C:\alloy_setup.ps1'; & 'C:\alloy_setup.ps1' -LokiUrl '$LOKI_URL'; Remove-Item -Path 'C:\alloy_setup.ps1' -Force -ErrorAction SilentlyContinue;"
     
     # Run the command in background and show spinner
     qm guest exec $vmid --timeout 120 powershell.exe "$deploy_cmd" >/dev/null 2>&1 &

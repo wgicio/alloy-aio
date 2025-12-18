@@ -21,6 +21,7 @@ param(
     [string]$LokiUrl = "",
     [string]$PrometheusUrl = "",
     [string]$ConfigUrl = "",
+    [switch]$NonInteractive,
     [switch]$Help
 )
 
@@ -82,34 +83,58 @@ if ($Help) {
 }
 
 function Test-IsVirtualMachine {
-    # Check specifically for Proxmox VM
+    # Detect KVM/Proxmox and other hypervisors used in Proxmox environments
+    $vmPatterns = @("Proxmox", "QEMU", "KVM", "Bochs", "SeaBIOS", "Virtual Machine")
+
     try {
-        $bios = Get-WmiObject -Class Win32_BIOS
-        if ($bios.Manufacturer -match "Proxmox") {
-            Write-LogMessage "Proxmox VM detected via BIOS manufacturer: $($bios.Manufacturer)" "INFO"
-            return $true
+        $cs = Get-CimInstance -ClassName Win32_ComputerSystem
+        $bios = Get-CimInstance -ClassName Win32_BIOS
+        $board = Get-CimInstance -ClassName Win32_BaseBoard
+
+        $indicators = @(
+            $cs.Manufacturer,
+            $cs.Model,
+            $bios.Manufacturer,
+            $bios.SMBIOSBIOSVersion,
+            $board.Manufacturer
+        ) | Where-Object { $_ }
+
+        foreach ($pattern in $vmPatterns) {
+            if ($indicators -match $pattern) {
+                Write-LogMessage "Virtual machine detected via '$pattern' indicator" "INFO"
+                return $true
+            }
         }
     } catch {
-        Write-LogMessage "Failed to query BIOS information: $($_.Exception.Message)" "WARNING"
+        Write-LogMessage "Failed to query hardware information: $($_.Exception.Message)" "WARNING"
     }
-    
+
     return $false
 }
 
 # Configuration
 $IsVM = Test-IsVirtualMachine
-# Override ConfigUrl if not explicitly provided and running in a VM
-if (-not $ConfigUrl -and $IsVM) {
-    $ConfigUrl = "https://github.com/IT-BAER/alloy-aio/raw/main/aio-windows-logs.alloy"
-}
-$DefaultConfigUrl = if ($IsVM) {
-    "https://github.com/IT-BAER/alloy-aio/raw/main/aio-windows-logs.alloy"
-} else {
-    "https://github.com/IT-BAER/alloy-aio/raw/main/aio-windows.alloy"
+# Default to logs-only either when running as a VM or when no Prometheus endpoint is provided
+$UseLogsOnly = $IsVM -or [string]::IsNullOrWhiteSpace($PrometheusUrl)
+
+if ($IsVM -and $PrometheusUrl) {
+    Write-LogMessage "Prometheus endpoint provided but ignored on VMs; applying logs-only config" "WARNING"
 }
 
+if (-not $ConfigUrl) {
+    $ConfigUrl = if ($UseLogsOnly) {
+        "https://github.com/IT-BAER/alloy-aio/raw/main/aio-windows-logs.alloy"
+    } else {
+        "https://github.com/IT-BAER/alloy-aio/raw/main/aio-windows.alloy"
+    }
+}
+
+$DefaultConfigUrl = $ConfigUrl
+
 # Show appropriate message based on system type
-if ($IsVM) {
+if ($UseLogsOnly -and -not $PrometheusUrl) {
+    Write-LogMessage "No Prometheus endpoint provided - using logs-only configuration" "INFO"
+} elseif ($IsVM) {
     Write-LogMessage "Virtual machine detected - installing logs-only configuration" "INFO"
 } else {
     Write-LogMessage "Physical machine detected - installing full configuration (logs + metrics)" "INFO"
@@ -122,7 +147,7 @@ $ConfigFile = if ($ConfigUrl) {
     $fn = [System.IO.Path]::GetFileName($ConfigUrl)
     if ($fn) { "$InstallDir\$fn" } else { "$InstallDir\aio-windows.alloy" }
 } else {
-    "$InstallDir\aio-windows.alloy"
+    if ($UseLogsOnly) { "$InstallDir\aio-windows-logs.alloy" } else { "$InstallDir\aio-windows.alloy" }
 }
 
 # Global cleanup function that can be called from anywhere
@@ -279,13 +304,13 @@ function Deploy-Configuration {
         if (-not (Test-Path $regPath)) { New-Item -Path $regPath -Force | Out-Null }
         $currentArgs = (Get-ItemProperty -Path $regPath -Name Arguments -ErrorAction SilentlyContinue).Arguments
         if ($currentArgs) {
-            $configFileName = if ($IsVM) { 'aio-windows-logs.alloy' } else { 'aio-windows.alloy' }
+            $configFileName = if ($UseLogsOnly) { 'aio-windows-logs.alloy' } else { 'aio-windows.alloy' }
             $newArgs = $currentArgs -replace '(config|aio-windows|aio-windows-logs)\.alloy', $configFileName
             Set-ItemProperty -Path $regPath -Name Arguments -Value $newArgs -Force
             Write-LogMessage "Registry updated: Arguments = $newArgs" "SUCCESS"
         } else {
             # If not set, set to default using appropriate config file
-            $configFileName = if ($IsVM) { 'aio-windows-logs.alloy' } else { 'aio-windows.alloy' }
+            $configFileName = if ($UseLogsOnly) { 'aio-windows-logs.alloy' } else { 'aio-windows.alloy' }
             $defaultArgs = "run`r`nC:\Program Files\GrafanaLabs\Alloy\$configFileName`r`n--storage.path=C:\ProgramData\GrafanaLabs\Alloy\data"
             Set-ItemProperty -Path $regPath -Name Arguments -Value $defaultArgs -Force
             Write-LogMessage "Registry Arguments created: $defaultArgs" "SUCCESS"
@@ -306,8 +331,8 @@ function Deploy-Configuration {
         }
     }
 
-    # Only update Prometheus URL if not a VM
-    if ($PrometheusUrl -and -not $IsVM) {
+    # Only update Prometheus URL when metrics are enabled
+    if ($PrometheusUrl -and -not $UseLogsOnly) {
         Write-LogMessage "Updating Prometheus endpoint: $PrometheusUrl"
         (Get-Content $ConfigFile) -replace 'https://your-prometheus-instance.com/api/v1/write', $PrometheusUrl | Set-Content $ConfigFile
         if ((Get-Content $ConfigFile) -match [regex]::Escape($PrometheusUrl)) {
@@ -381,13 +406,13 @@ function Show-FinalStatus {
     Write-Host ""
 
     $service = Get-Service -Name "Alloy" -ErrorAction SilentlyContinue
-    $configType = if ($IsVM) { "logs only (VM-optimized)" } else { "logs + metrics (full observability)" }
+    $configType = if ($UseLogsOnly) { "logs only (VM-optimized or Loki-only)" } else { "logs + metrics (full observability)" }
     if ($service -and $service.Status -eq "Running") {
         Write-LogMessage "✅ Alloy is installed and running ($configType)" "SUCCESS"
         Write-LogMessage "Configuration file: $ConfigFile"
         Write-LogMessage "Web UI: http://127.0.0.1:12345/"
         Write-LogMessage "Windows Event Logs: Application, System, Security"
-        if (-not $IsVM) {
+        if (-not $UseLogsOnly) {
             Write-LogMessage "Windows Metrics: CPU, Memory, Disk, Network, Services, etc."
         }
         Write-Host ""
