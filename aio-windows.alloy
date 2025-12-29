@@ -167,7 +167,7 @@ prometheus.exporter.windows "metrics" {
     
     // SYSTEM SERVICES & PROCESSES
     "service",          // Windows service state metrics
-    "process",          // Per-process metrics
+    // "process",          // Per-process metrics (DISABLED due to high cardinality/memory leak)
     
     // ADDITIONAL USEFUL METRICS
     "time",             // Windows Time Service metrics
@@ -189,6 +189,13 @@ prometheus.scrape "metrics" {
 // Relabel Windows metrics to use instance_ prefix for unified metrics
 prometheus.relabel "windows_to_instance" {
   forward_to = [prometheus.remote_write.default.receiver]
+
+  // Drop high-cardinality metrics that overwhelm the server
+  rule {
+    source_labels = ["__name__"]
+    regex         = "windows_process_.*"
+    action        = "drop"
+  }
 
   // Rename windows_ prefix to instance_ prefix for unified metrics
   rule {
