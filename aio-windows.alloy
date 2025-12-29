@@ -193,7 +193,7 @@ prometheus.relabel "windows_to_instance" {
   // Drop high-cardinality metrics that overwhelm the server
   rule {
     source_labels = ["__name__"]
-    regex         = "windows_process_.*"
+    regex         = "windows_process_.*|windows_service_process"
     action        = "drop"
   }
 
