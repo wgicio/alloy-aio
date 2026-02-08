@@ -84,30 +84,7 @@ if ($Help) {
 
 function Test-IsVirtualMachine {
     # Detect KVM/Proxmox and other hypervisors used in Proxmox environments
-    $vmPatterns = @("Proxmox", "QEMU", "KVM", "Bochs", "SeaBIOS", "Virtual Machine")
 
-    try {
-        $cs = Get-CimInstance -ClassName Win32_ComputerSystem
-        $bios = Get-CimInstance -ClassName Win32_BIOS
-        $board = Get-CimInstance -ClassName Win32_BaseBoard
-
-        $indicators = @(
-            $cs.Manufacturer,
-            $cs.Model,
-            $bios.Manufacturer,
-            $bios.SMBIOSBIOSVersion,
-            $board.Manufacturer
-        ) | Where-Object { $_ }
-
-        foreach ($pattern in $vmPatterns) {
-            if ($indicators -match $pattern) {
-                Write-LogMessage "Virtual machine detected via '$pattern' indicator" "INFO"
-                return $true
-            }
-        }
-    } catch {
-        Write-LogMessage "Failed to query hardware information: $($_.Exception.Message)" "WARNING"
-    }
 
     return $false
 }
